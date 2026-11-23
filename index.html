@@ -48,7 +48,11 @@
   #titleMenu { left: 70px; top: 360px; width: 220px; display: grid; gap: 14px; }
   #howtoMenu { left: 30px; top: 470px; width: 300px; }
   #pauseMenu { left: 70px; top: 300px; width: 220px; display: grid; gap: 14px; }
-  #overMenu { left: 30px; top: 400px; width: 300px; display: grid; gap: 12px; }
+  #overMenu { left: 30px; top: 382px; width: 300px; display: grid; gap: 10px; }
+  #overMenu .share { display: flex; gap: 8px; }
+  #overMenu .share .btn { flex: 1; font-size: 14px; padding: 9px 0; text-align: center; text-decoration: none; }
+  .btn.x { background: linear-gradient(#333, #000); box-shadow: 0 4px 0 #000, 0 6px 14px #0006; }
+  .btn.line { background: linear-gradient(#22d36b, #06a64a); box-shadow: 0 4px 0 #04652d, 0 6px 14px #0006; }
   #rescue {
     left: 20px; top: 390px; width: 288px; padding: 12px 16px;
     background: #fffaf0f2; border-radius: 16px; box-shadow: 0 8px 24px #0008;
@@ -95,6 +99,11 @@
   </div>
   <div id="overMenu" hidden>
     <button id="shareBtn" class="btn green" type="button" data-t="share">📤 結果をシェア</button>
+    <div class="share">
+      <a id="shareX" class="btn x" target="_blank" rel="noopener" data-t="shareX">𝕏 ポスト</a>
+      <a id="shareLine" class="btn line" target="_blank" rel="noopener">LINE</a>
+      <button id="shareCopy" class="btn sub" type="button" data-t="shareCopy">コピー</button>
+    </div>
     <div class="row">
       <button id="retryBtn" class="btn" type="button" data-t="retryBtn">もう一度</button>
       <button id="titleBtn" class="btn sub" type="button" data-t="toTitle">タイトルへ</button>
@@ -179,7 +188,7 @@ const I18N = {
     privacy: 'プライバシーポリシー', privacyUrl: 'https://techgym.jp/privacy-policy/', adSettings: '広告の設定',
     shareTitle: 'とべ！たいやきちゃん', shareDialog: '結果をシェア',
     shareText: (n, r) => `🐟とべ！たいやきちゃんで、たい焼きを ${n} 匹 昇天させました！${r ? `（取り返し ${r} 回）` : ''}\n#とべたいやきちゃん #たい焼き`,
-    copied: 'コピーしました',
+    copied: 'コピーしました', shareX: '𝕏 ポスト', shareCopy: 'コピー',
   },
   en: {
     docTitle: 'Fly Away, Taiyaki-chan!',
@@ -217,7 +226,7 @@ const I18N = {
     privacy: 'Privacy Policy', privacyUrl: 'https://techgym.jp/privacy-policy-en/', adSettings: 'Ad settings',
     shareTitle: 'Fly Away, Taiyaki-chan!', shareDialog: 'Share result',
     shareText: (n, r) => `🐟 I sent ${n} taiyaki up to heaven in "Fly Away, Taiyaki-chan!"${r ? ` (taken back ${r}×)` : ''}\n#taiyaki`,
-    copied: 'Copied',
+    copied: 'Copied', shareX: '𝕏 Post', shareCopy: 'Copy',
   },
 };
 let lang = 'ja';
@@ -947,22 +956,34 @@ function takeBack() {
 }
 
 // ---------- 結果のシェア ----------
+const SHARE_URL = 'https://techgym.jp/column/claude-code-game-taiyaki/'; // 紹介記事
+// 結果画面を開いたときに、𝕏・LINE のリンク先を今回の成績で作っておく
+function prepareShare() {
+  const text = T().shareText(score, rescues);
+  $('shareX').href = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(SHARE_URL)}`;
+  $('shareLine').href = `https://line.me/R/share?text=${encodeURIComponent(text + '\n' + SHARE_URL)}`;
+}
 async function shareResult() {
   const text = T().shareText(score, rescues);
   const nativeShare = plugin('Share');
   if (nativeShare) {
-    try { await nativeShare.share({ title: T().shareTitle, text, dialogTitle: T().shareDialog }); } catch (e) { /* キャンセル */ }
+    try { await nativeShare.share({ title: T().shareTitle, text, url: SHARE_URL, dialogTitle: T().shareDialog }); } catch (e) { /* キャンセル */ }
     return;
   }
   if (navigator.share) {
-    try { await navigator.share({ title: T().shareTitle, text }); } catch (e) { /* キャンセル */ }
+    try { await navigator.share({ title: T().shareTitle, text, url: SHARE_URL }); } catch (e) { /* キャンセル */ }
     return;
   }
+  copyResult();
+}
+async function copyResult() {
   try {
-    await navigator.clipboard.writeText(text);
-    texts.push({ x: W / 2, y: 380, text: T().copied, t: 0, color: '#fff' });
+    await navigator.clipboard.writeText(T().shareText(score, rescues) + '\n' + SHARE_URL);
+    texts.push({ x: W / 2, y: 365, text: T().copied, t: 0, color: '#fff' });
   } catch (e) { /* 何もしない */ }
 }
+click('shareCopy', copyResult);
+for (const id of ['shareX', 'shareLine']) $(id).addEventListener('click', e => e.stopPropagation());
 
 // ---------- ボタンの表示・バナー ----------
 const uiEls = {};
@@ -976,6 +997,7 @@ function updateUI() {
   showEl('howtoMenu', state === 'howto' && free);
   showEl('pauseMenu', state === 'play' && paused && free);
   showEl('pauseBtn', state === 'play' && !paused);
+  if (state === 'over' && uiEls.overMenu.hidden) prepareShare();
   showEl('overMenu', state === 'over' && free);
   // バナー広告：タイトル・あそびかた・ポーズ・結果画面だけ（プレイ中は出さない）
   Ads.setBanner(state === 'title' || state === 'howto' || state === 'over' || (state === 'play' && paused));
@@ -2136,7 +2158,7 @@ window.__game = {
       if (ph === 'done') { s.doneAt = elapsed - 0.2; s.deadline = elapsed + (i === 0 ? 1.6 : 6); }
     });
     flyers.push({ x: 300, x0: 300, y: 230, t: 4, face: 1, seed: 1, pal: BALLOON_COLORS[1] });
-    flyers.push({ x: 320, x0: 320, y: 40, t: 6, face: -1, seed: 2, pal: BALLOON_COLORS[3] });
+    flyers.push({ x: 175, x0: 175, y: 70, t: 6, face: -1, seed: 2, pal: BALLOON_COLORS[3] });
   },
   balloons() {
     startGame();
