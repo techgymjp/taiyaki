@@ -31,8 +31,9 @@
     font: bold 14px sans-serif; cursor: pointer; padding: 0;
   }
   #mute { right: 8px; top: 8px; font-size: 18px; }
-  #lang { right: 54px; top: 8px; }
-  #pauseBtn { left: 8px; top: 8px; font-size: 15px; letter-spacing: -1px; }
+  #lang { left: 8px; top: 8px; }   /* タイトル画面だけ（ポーズボタンと同じ場所。同時には出ない） */
+  #pauseBtn { left: 8px; top: 8px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+  #pauseBtn i { display: block; width: 4px; height: 14px; border-radius: 1px; background: #fff; }
   .btn {
     display: block; border: none; border-radius: 26px; cursor: pointer;
     font: 900 19px sans-serif; color: #fff; padding: 12px 0;
@@ -65,7 +66,7 @@
 <body>
 <canvas id="c"></canvas>
 <div id="ui">
-  <button id="pauseBtn" class="round" type="button" aria-label="Pause" hidden>❚❚</button>
+  <button id="pauseBtn" class="round" type="button" aria-label="Pause" hidden><i></i><i></i></button>
   <button id="lang" class="round" type="button" aria-label="Language">EN</button>
   <button id="mute" class="round" type="button" aria-label="Sound on/off">♪</button>
   <div id="titleMenu" hidden>
@@ -1289,16 +1290,17 @@ function drawBackground() {
     ctx.beginPath(); ctx.moveTo(x, 60); ctx.lineTo(x, 290); ctx.stroke();
   }
   // のれん
-  const nw = W / 4;
+  // のれん（左右の角はボタンを置くので空けておく）
+  const NX = 56, nw = (W - NX * 2) / 4;
   for (let i = 0; i < 4; i++) {
     ctx.fillStyle = '#1f3a6e';
-    rr(i * nw + 2, -10, nw - 4, 74, 4);
+    rr(NX + i * nw + 2, -10, nw - 4, 74, 4);
     ctx.fill();
   }
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 30px "Hiragino Mincho ProN", "Yu Mincho", serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ['た', 'い', 'や', 'き'].forEach((ch, i) => ctx.fillText(ch, i * nw + nw / 2, 30));
+  ['た', 'い', 'や', 'き'].forEach((ch, i) => ctx.fillText(ch, NX + i * nw + nw / 2, 30));
   // 棒
   ctx.fillStyle = '#5a3418';
   ctx.fillRect(0, 0, W, 6);
