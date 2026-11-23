@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>とべ！たいやきちゃん</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #3b2414;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; }
+  #mute {
+    position: fixed; right: 10px; bottom: 10px;
+    width: 44px; height: 44px; border-radius: 22px;
+    border: 2px solid #fff3; background: #0006; color: #fff;
+    font-size: 20px; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="mute" aria-label="音のオン・オフ">♪</button>
+<script type="module">
+import { createTaiyakiSprites } from './taiyaki3d.js';
+{
+
+// ===================== 画面 =====================
+const W = 360, H = 640;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let scale = 1;
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  scale = Math.min(window.innerWidth / W, window.innerHeight / H);
+  canvas.style.width = (W * scale) + 'px';
+  canvas.style.height = (H * scale) + 'px';
+  canvas.width = Math.round(W * scale * dpr);
+  canvas.height = Math.round(H * scale * dpr);
+  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ===================== 3Dたい焼き =====================
+let sprites = null;
+try {
+  sprites = createTaiyakiSprites();
+  if (sprites) sprites.warm();
+} catch (e) { console.warn('3D描画が使えないので2Dで表示します', e); sprites = null; }
+const PX_PER_UNIT = 41;
+
+// ===================== 保存 =====================
+function loadBest() {
+  try { return parseInt(localStorage.getItem('taiyaki-best') || '0', 10) || 0; } catch (e) { return 0; }
+}
+function saveBest(v) {
+  try { localStorage.setItem('taiyaki-best', String(v)); } catch (e) {}
+}
+
+// ===================== サウンド =====================
+const Sound = {
+  ctx: null, master: null, bgmGain: null, sfxGain: null,
+  muted: false, playing: false, nextTime: 0, step: 0, timer: null,
+  tempo: 140,
+
+  init() {
+    if (this.ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.8;
+    this.master.connect(this.ctx.destination);
+    this.bgmGain = this.ctx.createGain();
+    this.bgmGain.gain.value = 0.35;
+    this.bgmGain.connect(this.master);
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.value = 0.6;
+    this.sfxGain.connect(this.master);
+    // ノイズバッファ
+    const len = this.ctx.sampleRate * 0.5;
+    this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = this.noise.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  },
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+  },
+  setMuted(m) {
+    this.muted = m;
+    if (this.master) this.master.gain.value = m ? 0 : 0.8;
+  },
+  freq(m) { return 440 * Math.pow(2, (m - 69) / 12); },
+
+  tone(type, midi, t, dur, vol, dest, vib) {
+    const c = this.ctx;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(this.freq(midi), t);
+    if (vib) {
+      const lfo = c.createOscillator();
+      const lg = c.createGain();
+      lfo.frequency.value = 5.5;
+      lg.gain.value = this.freq(midi) * 0.012;
+      lfo.connect(lg); lg.connect(o.frequency);
+      lfo.start(t + 0.08); lfo.stop(t + dur + 0.05);
+    }
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.setTargetAtTime(vol * 0.6, t + 0.03, 0.08);
+    g.gain.setTargetAtTime(0.0001, t + dur * 0.85, 0.03);
+    o.connect(g); g.connect(dest);
+    o.start(t); o.stop(t + dur + 0.2);
+  },
+  hat(t, vol) {
+    const c = this.ctx;
+    const s = c.createBufferSource();
+    s.buffer = this.noise;
+    const f = c.createBiquadFilter();
+    f.type = 'highpass'; f.frequency.value = 7000;
+    const g = c.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    s.connect(f); f.connect(g); g.connect(this.bgmGain);
+    s.start(t); s.stop(t + 0.06);
+  },
+  kick(t) {
+    const c = this.ctx;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.frequency.setValueAtTime(140, t);
+    o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+    g.gain.setValueAtTime(0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    o.connect(g); g.connect(this.bgmGain);
+    o.start(t); o.stop(t + 0.16);
+  },
+
+  // ---- オリジナル曲：昭和の童謡ふうの短調メロディ（8分音符単位） ----
+  // [MIDIノート or null(休符), 長さ(8分音符の数)]
+  melody: [
+    // A 鉄板の上で
+    [69,1],[72,1],[76,2],[76,1],[74,1],[72,2],
+    [74,1],[76,1],[79,2],[76,4],
+    [81,1],[79,1],[76,2],[74,1],[72,1],[74,2],
+    [76,2],[69,2],[69,3],[null,1],
+    // B 海をゆめみて
+    [72,1],[74,1],[76,1],[79,1],[81,2],[79,2],
+    [76,1],[79,1],[76,1],[74,1],[72,4],
+    [74,1],[74,1],[76,1],[72,1],[71,2],[67,2],
+    [69,6],[null,2],
+    // C 長調にひらけて
+    [79,2],[76,1],[79,1],[81,2],[79,2],
+    [76,1],[74,1],[72,2],[74,4],
+    [76,2],[79,1],[76,1],[74,2],[72,2],
+    [74,2],[76,2],[71,3],[null,1],
+    // B' しめくくり
+    [72,1],[74,1],[76,1],[79,1],[81,2],[79,2],
+    [76,1],[79,1],[76,1],[74,1],[72,4],
+    [74,1],[74,1],[76,1],[72,1],[71,2],[68,2],
+    [69,6],[null,2],
+  ],
+  // 1小節ごとのベース（ルート, 5度）
+  bass: [
+    [45,52],[48,55],[45,52],[45,52],
+    [41,48],[48,55],[43,50],[45,52],
+    [48,55],[43,50],[45,52],[40,47],
+    [41,48],[48,55],[40,47],[45,52],
+  ],
+
+  startBgm() {
+    if (!this.ctx || this.playing) return;
+    this.playing = true;
+    this.nextTime = this.ctx.currentTime + 0.1;
+    this.melIdx = 0; this.melLeft = 0; this.step = 0;
+    this.timer = setInterval(() => this.schedule(), 25);
+  },
+  stopBgm() {
+    this.playing = false;
+    clearInterval(this.timer);
+  },
+  schedule() {
+    const c = this.ctx;
+    while (this.nextTime < c.currentTime + 0.12) {
+      const e = 60 / this.tempo / 2; // 8分音符の長さ
+      const t = this.nextTime;
+      const totalSteps = 16 * 8;
+      const s = this.step % totalSteps;
+      // メロディ
+      if (this.melLeft <= 0) {
+        const n = this.melody[this.melIdx % this.melody.length];
+        if (n[0] !== null) this.tone('square', n[0], t, e * n[1] * 0.92, 0.18, this.bgmGain, n[1] >= 3);
+        // 下に3度のハモり（薄く）
+        if (n[0] !== null && n[1] >= 2) this.tone('triangle', n[0] - 12, t, e * n[1] * 0.9, 0.08, this.bgmGain, false);
+        this.melLeft = n[1];
+        this.melIdx++;
+      }
+      this.melLeft--;
+      // ベース（ぴょこぴょこ跳ねる）
+      const bar = Math.floor(s / 8);
+      const inBar = s % 8;
+      const b = this.bass[bar];
+      if (inBar % 2 === 0) {
+        const note = [b[0], b[1], b[0] + 12, b[1]][inBar / 2];
+        this.tone('triangle', note, t, e * 0.9, 0.32, this.bgmGain, false);
+      }
+      // リズム
+      if (inBar === 0 || inBar === 4) this.kick(t);
+      if (inBar % 2 === 1) this.hat(t, 0.08);
+      this.nextTime += e;
+      this.step++;
+      if (this.step % totalSteps === 0) this.melIdx = 0;
+    }
+  },
+
+  // ---- 効果音 ----
+  jump() {
+    if (!this.ctx) return;
+    const c = this.ctx, t = c.currentTime;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'square';
+    o.frequency.setValueAtTime(400, t);
+    o.frequency.exponentialRampToValueAtTime(1400, t + 0.18);
+    g.gain.setValueAtTime(0.25, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    o.connect(g); g.connect(this.sfxGain);
+    o.start(t); o.stop(t + 0.26);
+    // キラッ
+    [88, 93].forEach((m, i) => this.tone('triangle', m, t + 0.12 + i * 0.06, 0.08, 0.15, this.sfxGain, false));
+  },
+  poke() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.tone('square', 50, t, 0.07, 0.15, this.sfxGain, false);
+  },
+  sizzle() {
+    if (!this.ctx) return;
+    const c = this.ctx, t = c.currentTime;
+    const s = c.createBufferSource();
+    s.buffer = this.noise;
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass'; f.frequency.value = 4000; f.Q.value = 0.8;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    s.connect(f); f.connect(g); g.connect(this.sfxGain);
+    s.start(t); s.stop(t + 0.4);
+  },
+  gameOver() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    [[72,0],[71,0.18],[70,0.36],[69,0.54]].forEach(([m, d], i) =>
+      this.tone('square', m, t + d, i === 3 ? 0.7 : 0.16, 0.22, this.sfxGain, i === 3));
+  },
+};
+
+const muteBtn = document.getElementById('mute');
+muteBtn.addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  Sound.init(); Sound.resume();
+  Sound.setMuted(!Sound.muted);
+  muteBtn.textContent = Sound.muted ? '×' : '♪';
+});
+
+// ===================== ゲーム状態 =====================
+const SLOTS = [];
+const COLS = [70, 180, 290], ROWS = [375, 480];
+for (const y of ROWS) for (const x of COLS) SLOTS.push({ x, y });
+
+let state = 'title'; // title | play | over
+let slots, flyers, particles, texts, score, best = loadBest(), elapsed, overAt, caughtSlot;
+let tongs;
+
+function reset() {
+  slots = SLOTS.map((p, i) => ({
+    i, x: p.x, y: p.y,
+    phase: 'empty',
+    wait: 0.3 + Math.random() * 1.5 + i * 0.15,
+    cook: 0, cookTime: 4,
+    doneAt: 0, deadline: 0,
+    shake: 0,
+  }));
+  flyers = [];
+  particles = [];
+  texts = [];
+  score = 0;
+  elapsed = 0;
+  caughtSlot = null;
+  tongs = { x: 285, y: 300, target: null, fromX: 285, fromY: 300, startT: 0, lift: 0 };
+}
+reset();
+
+// 難易度
+function cookTimeNow() {
+  const base = Math.max(1.6, 4.2 - elapsed * 0.035 - score * 0.02);
+  return base * (0.8 + Math.random() * 0.5);
+}
+function grabWindowNow() {
+  return Math.max(0.6, 1.7 - score * 0.022 - elapsed * 0.004);
+}
+
+function startGame() {
+  Sound.init(); Sound.resume();
+  reset();
+  state = 'play';
+  Sound.tempo = 140;
+  Sound.startBgm();
+}
+
+function gameOver(slot) {
+  state = 'over';
+  overAt = performance.now();
+  caughtSlot = slot;
+  slot.phase = 'taken';
+  if (score > best) { best = score; saveBest(best); }
+  Sound.stopBgm();
+  Sound.gameOver();
+}
+
+// ===================== 入力 =====================
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  const x = (e.clientX - r.left) / scale;
+  const y = (e.clientY - r.top) / scale;
+  if (state === 'title') { startGame(); return; }
+  if (state === 'over') {
+    if (performance.now() - overAt > 900) startGame();
+    return;
+  }
+  // 一番近いたい焼きを探す
+  let hit = null, bestD = Infinity;
+  for (const s of slots) {
+    const dx = (x - s.x) / 58, dy = (y - s.y) / 42;
+    const d = dx * dx + dy * dy;
+    if (d < 1 && d < bestD) { bestD = d; hit = s; }
+  }
+  if (!hit) return;
+  if (hit.phase === 'done') {
+    escape(hit);
+  } else if (hit.phase === 'cooking') {
+    if (hit.shake > 0) return;
+    hit.shake = 0.5;
+    Sound.poke();
+    texts.push({ x: hit.x, y: hit.y - 30, text: 'まだ！', t: 0, color: '#fff' });
+  }
+});
+
+function escape(s) {
+  const now = elapsed;
+  const timeLeft = s.deadline - now;
+  const win = s.deadline - s.doneAt;
+  score++;
+  Sound.jump();
+  const dir = s.x < 180 ? -1 : s.x > 180 ? 1 : (Math.random() < 0.5 ? -1 : 1);
+  flyers.push({
+    x: s.x, y: s.y, vx: dir * (60 + Math.random() * 60), vy: -520,
+    rot: 0, vr: dir * 2, t: 0, dir,
+  });
+  for (let k = 0; k < 12; k++) {
+    const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 140;
+    particles.push({ x: s.x, y: s.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60, t: 0, life: 0.6, star: true });
+  }
+  const msg = timeLeft < win * 0.25 ? 'ギリギリ!' : ['にげろー！', 'ぴょーん！', 'あばよ！', 'うみへ！'][Math.floor(Math.random() * 4)];
+  texts.push({ x: s.x, y: s.y - 30, text: msg, t: 0, color: '#ffe066' });
+  s.phase = 'empty';
+  s.wait = 0.4 + Math.random() * 1.2;
+  s.cook = 0;
+  if (tongs.target === s) tongs.target = null;
+}
+
+// ===================== 更新 =====================
+function update(dt) {
+  if (state === 'play') {
+    elapsed += dt;
+    Sound.tempo = Math.min(180, 140 + score * 0.8);
+    for (const s of slots) {
+      if (s.shake > 0) s.shake -= dt;
+      if (s.phase === 'empty') {
+        s.wait -= dt;
+        if (s.wait <= 0) {
+          s.phase = 'cooking';
+          s.cook = 0;
+          s.cookTime = cookTimeNow();
+        }
+      } else if (s.phase === 'cooking') {
+        s.cook += dt / s.cookTime;
+        if (Math.random() < dt * 3) particles.push({ x: s.x + (Math.random() - 0.5) * 60, y: s.y - 10, vx: 0, vy: -30, t: 0, life: 1.2, steam: true });
+        if (s.cook >= 1) {
+          s.cook = 1;
+          s.phase = 'done';
+          s.doneAt = elapsed;
+          s.deadline = elapsed + grabWindowNow();
+          Sound.sizzle();
+        }
+      } else if (s.phase === 'done') {
+        if (elapsed >= s.deadline) { gameOver(s); break; }
+      }
+    }
+    // おじさんのトング：一番締め切りの近いたい焼きを狙う
+    if (state === 'play') {
+      let target = null;
+      for (const s of slots) if (s.phase === 'done' && (!target || s.deadline < target.deadline)) target = s;
+      if (target !== tongs.target) {
+        tongs.target = target;
+        tongs.fromX = tongs.x; tongs.fromY = tongs.y; tongs.startT = elapsed;
+      }
+      if (target) {
+        const p = Math.min(1, (elapsed - tongs.startT) / Math.max(0.01, target.deadline - tongs.startT));
+        const e = p * p * (3 - 2 * p);
+        tongs.x = tongs.fromX + (target.x - tongs.fromX) * e;
+        tongs.y = tongs.fromY + (target.y - 12 - tongs.fromY) * e;
+      } else {
+        tongs.x += (285 - tongs.x) * Math.min(1, dt * 6);
+        tongs.y += (300 - tongs.y) * Math.min(1, dt * 6);
+      }
+    }
+  } else if (state === 'over' && caughtSlot) {
+    // つかんで持ち上げる
+    tongs.lift = Math.min(1, tongs.lift + dt * 1.5);
+    tongs.x = caughtSlot.x + (180 - caughtSlot.x) * tongs.lift * 0.6;
+    tongs.y = caughtSlot.y - 12 - 130 * tongs.lift;
+  }
+
+  for (const f of flyers) {
+    f.t += dt;
+    f.vy += 260 * dt * (f.vy < -150 ? 1 : 0.2);
+    f.vx += f.dir * 120 * dt;
+    f.x += f.vx * dt;
+    f.y += f.vy * dt;
+    f.rot = Math.sin(f.t * 14) * 0.25 + f.dir * Math.min(0.6, f.t);
+    if (Math.random() < dt * 30) particles.push({ x: f.x, y: f.y + 15, vx: (Math.random() - 0.5) * 40, vy: 40, t: 0, life: 0.5, bubble: true });
+  }
+  flyers = flyers.filter(f => f.y > -100 && f.x > -100 && f.x < W + 100);
+  for (const p of particles) {
+    p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.star) p.vy += 300 * dt;
+  }
+  particles = particles.filter(p => p.t < p.life);
+  for (const t of texts) t.t += dt;
+  texts = texts.filter(t => t.t < 1);
+}
+
+// ===================== 描画 =====================
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function lerpColor(a, b, t) {
+  const r = Math.round(a[0] + (b[0] - a[0]) * t);
+  const g = Math.round(a[1] + (b[1] - a[1]) * t);
+  const bl = Math.round(a[2] + (b[2] - a[2]) * t);
+  return `rgb(${r},${g},${bl})`;
+}
+function cookColor(c) {
+  const raw = [246, 232, 190], mid = [236, 190, 110], done = [205, 125, 45];
+  return c < 0.5 ? lerpColor(raw, mid, c * 2) : lerpColor(mid, done, (c - 0.5) * 2);
+}
+
+// たい焼きを描く（右向き）
+function drawTaiyaki(x, y, s, cook, rot, face, wiggle) {
+  if (sprites) {
+    const yaw = wiggle ? Math.sin(wiggle * 0.3) * 0.6 : 0;
+    const img = sprites.get(cook, yaw);
+    const w = sprites.unitW * PX_PER_UNIT, h = sprites.unitH * PX_PER_UNIT;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot || 0);
+    ctx.scale(s * (face < 0 ? -1 : 1), s);
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    ctx.restore();
+    return;
+  }
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot || 0);
+  ctx.scale(s * (face < 0 ? -1 : 1), s);
+  const body = cookColor(cook);
+  const edge = lerpColor([215, 195, 150], [130, 70, 20], cook);
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = edge;
+  ctx.fillStyle = body;
+  // しっぽ
+  const tw = Math.sin(wiggle || 0) * 6;
+  ctx.beginPath();
+  ctx.moveTo(-30, 0);
+  ctx.quadraticCurveTo(-42, -4, -54, -20 + tw);
+  ctx.quadraticCurveTo(-48, 0 + tw * 0.5, -54, 20 + tw);
+  ctx.quadraticCurveTo(-42, 4, -30, 0);
+  ctx.fill(); ctx.stroke();
+  // 背びれ・腹びれ
+  ctx.beginPath();
+  ctx.moveTo(-18, -24); ctx.quadraticCurveTo(0, -38, 16, -24); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-10, 24); ctx.quadraticCurveTo(2, 34, 10, 24); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // 体
+  ctx.beginPath();
+  ctx.moveTo(44, 0);
+  ctx.bezierCurveTo(40, -24, 10, -30, -10, -26);
+  ctx.bezierCurveTo(-26, -22, -36, -8, -36, 0);
+  ctx.bezierCurveTo(-36, 8, -26, 22, -10, 26);
+  ctx.bezierCurveTo(10, 30, 40, 24, 44, 0);
+  ctx.fill(); ctx.stroke();
+  // 焼き色のハイライト
+  if (cook > 0.3) {
+    const g = ctx.createRadialGradient(5, -6, 2, 5, -6, 34);
+    g.addColorStop(0, `rgba(255,230,160,${0.5 * cook})`);
+    g.addColorStop(1, 'rgba(255,230,160,0)');
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
+  // うろこ
+  ctx.strokeStyle = lerpColor([225, 205, 160], [150, 85, 25], cook);
+  ctx.lineWidth = 1.8;
+  for (let r = 0; r < 3; r++) {
+    for (let k = 0; k < 3; k++) {
+      const sx = -20 + k * 13 + (r % 2) * 6, sy = -12 + r * 10;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 5.5, -Math.PI / 2, Math.PI / 2);
+      ctx.stroke();
+    }
+  }
+  // えら
+  ctx.beginPath();
+  ctx.arc(22, 0, 16, -1.1, 1.1);
+  ctx.stroke();
+  // 目
+  ctx.fillStyle = cook > 0.6 ? '#3a1a05' : lerpColor([220, 200, 160], [60, 30, 10], cook);
+  ctx.beginPath(); ctx.arc(32, -8, 4, 0, Math.PI * 2); ctx.fill();
+  if (cook > 0.6) {
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(33.3, -9.5, 1.4, 0, Math.PI * 2); ctx.fill();
+  }
+  // 口
+  ctx.strokeStyle = edge;
+  ctx.beginPath(); ctx.arc(42, 5, 3, 0.5, 2.2); ctx.stroke();
+  ctx.restore();
+}
+
+function drawBackground() {
+  // 壁
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#f6d7a0');
+  g.addColorStop(0.45, '#e9b979');
+  g.addColorStop(1, '#6b3d1e');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  // 板張り
+  ctx.strokeStyle = 'rgba(120,70,30,0.15)';
+  ctx.lineWidth = 2;
+  for (let x = 0; x < W; x += 30) {
+    ctx.beginPath(); ctx.moveTo(x, 60); ctx.lineTo(x, 290); ctx.stroke();
+  }
+  // のれん
+  const nw = W / 4;
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = '#1f3a6e';
+    rr(i * nw + 2, -10, nw - 4, 74, 4);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 30px "Hiragino Mincho ProN", "Yu Mincho", serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ['た', 'い', 'や', 'き'].forEach((ch, i) => ctx.fillText(ch, i * nw + nw / 2, 30));
+  // 棒
+  ctx.fillStyle = '#5a3418';
+  ctx.fillRect(0, 0, W, 6);
+}
+
+function drawOjisan() {
+  const cx = 180, cy = 160;
+  const danger = tongs.target ? Math.min(1, (elapsed - tongs.startT) / Math.max(0.01, tongs.target.deadline - tongs.startT)) : 0;
+  const happy = state === 'over';
+  // 体（白い作務衣）
+  ctx.fillStyle = '#f4f1ea';
+  ctx.strokeStyle = '#8a7a66';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 95, 300);
+  ctx.quadraticCurveTo(cx - 90, 220, cx - 40, 210);
+  ctx.lineTo(cx + 40, 210);
+  ctx.quadraticCurveTo(cx + 90, 220, cx + 95, 300);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // えり
+  ctx.strokeStyle = '#2c4b85';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(cx - 25, 212); ctx.lineTo(cx + 5, 270);
+  ctx.moveTo(cx + 25, 212); ctx.lineTo(cx - 5, 260);
+  ctx.stroke();
+  // 首
+  ctx.fillStyle = '#e8b48a';
+  ctx.fillRect(cx - 16, 195, 32, 20);
+  // 顔
+  ctx.fillStyle = '#f0c49c';
+  ctx.strokeStyle = '#b07d55';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, 52, 56, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // 耳
+  ctx.beginPath(); ctx.ellipse(cx - 52, cy + 4, 9, 13, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(cx + 52, cy + 4, 9, 13, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  // 頭（短い白髪まじり）
+  ctx.fillStyle = '#555';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy - 34, 50, 26, 0, Math.PI, Math.PI * 2);
+  ctx.fill();
+  // ねじりはちまき
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#c33';
+  ctx.lineWidth = 2;
+  rr(cx - 54, cy - 42, 108, 16, 7);
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.strokeStyle = '#d44';
+  ctx.lineWidth = 3;
+  for (let x = cx - 60; x < cx + 60; x += 10) {
+    ctx.beginPath(); ctx.moveTo(x, cy - 42); ctx.lineTo(x + 8, cy - 26); ctx.stroke();
+  }
+  ctx.restore();
+  // 結び目
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.ellipse(cx + 54, cy - 38, 10, 6, -0.6, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx + 60, cy - 46, 10, 5, -1.2, 0, Math.PI * 2); ctx.fill();
+  // まゆ
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 6;
+  ctx.lineCap = 'round';
+  const tilt = happy ? -3 : danger * 6;
+  ctx.beginPath(); ctx.moveTo(cx - 34, cy - 14 - tilt); ctx.lineTo(cx - 12, cy - 12 + tilt); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx + 34, cy - 14 - tilt); ctx.lineTo(cx + 12, cy - 12 + tilt); ctx.stroke();
+  // 目（狙っているたい焼きを見る）
+  let lx = 0, ly = 0;
+  if (tongs.target) { lx = (tongs.target.x - cx) / 40; ly = 2; }
+  if (happy) {
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx - 22, cy + 2, 7, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx + 22, cy + 2, 7, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+  } else {
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.ellipse(cx - 22, cy, 9, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx + 22, cy, 9, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(cx - 22 + lx, cy + ly, 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 22 + lx, cy + ly, 4.5, 0, Math.PI * 2); ctx.fill();
+    if (danger > 0.5) {
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(cx - 20 + lx, cy - 2 + ly, 1.6, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + 24 + lx, cy - 2 + ly, 1.6, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  // ほっぺ
+  ctx.fillStyle = 'rgba(230,110,90,0.35)';
+  ctx.beginPath(); ctx.ellipse(cx - 34, cy + 20, 9, 6, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx + 34, cy + 20, 9, 6, 0, 0, Math.PI * 2); ctx.fill();
+  // 鼻
+  ctx.fillStyle = '#e3a57c';
+  ctx.beginPath(); ctx.ellipse(cx, cy + 12, 8, 10, 0, 0, Math.PI * 2); ctx.fill();
+  // ひげ
+  ctx.fillStyle = '#3a3a3a';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + 22);
+  ctx.quadraticCurveTo(cx - 20, cy + 16, cx - 32, cy + 30);
+  ctx.quadraticCurveTo(cx - 14, cy + 30, cx, cy + 26);
+  ctx.quadraticCurveTo(cx + 14, cy + 30, cx + 32, cy + 30);
+  ctx.quadraticCurveTo(cx + 20, cy + 16, cx, cy + 22);
+  ctx.fill();
+  // 口
+  ctx.strokeStyle = '#7a3a2a';
+  ctx.lineWidth = 3;
+  if (happy) {
+    ctx.fillStyle = '#7a2a1a';
+    ctx.beginPath(); ctx.arc(cx, cy + 34, 12, 0, Math.PI); ctx.fill();
+  } else if (danger > 0.3) {
+    ctx.beginPath(); ctx.moveTo(cx - 8, cy + 38); ctx.quadraticCurveTo(cx, cy + 34, cx + 8, cy + 38); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.moveTo(cx - 8, cy + 36); ctx.quadraticCurveTo(cx, cy + 40, cx + 8, cy + 36); ctx.stroke();
+  }
+  ctx.lineCap = 'butt';
+  // せりふ
+  if (state === 'play' && danger > 0.15) {
+    drawBubble(cx - 112, 135, 'よし、\n焼けたな…');
+  }
+  if (happy) drawBubble(cx - 112, 135, 'へい、\nいっちょあがり！');
+}
+
+function drawBubble(x, y, text) {
+  const lines = text.split('\n');
+  ctx.font = 'bold 13px sans-serif';
+  const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 18;
+  const h = lines.length * 17 + 10;
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2;
+  rr(x - w / 2, y - h / 2, w, h, 10);
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + w / 2 - 6, y + 2);
+  ctx.lineTo(x + w / 2 + 14, y + 14);
+  ctx.lineTo(x + w / 2 - 4, y + 12);
+  ctx.fill();
+  ctx.fillStyle = '#333';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  lines.forEach((l, i) => ctx.fillText(l, x, y - (lines.length - 1) * 8.5 + i * 17));
+}
+
+function drawPlate() {
+  // 台
+  ctx.fillStyle = '#4a2a14';
+  ctx.fillRect(0, 290, W, H - 290);
+  // 鉄板
+  ctx.fillStyle = '#2a2a2e';
+  rr(10, 305, W - 20, 240, 16);
+  ctx.fill();
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  // 型
+  for (const s of SLOTS) {
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.fillStyle = '#161618';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 54, 38, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#3c3c42';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+  // 火（下）
+  const t = performance.now() / 1000;
+  for (let i = 0; i < 9; i++) {
+    const x = 30 + i * 37.5;
+    const h = 14 + Math.sin(t * 9 + i * 1.7) * 4;
+    const g = ctx.createLinearGradient(0, 560, 0, 560 - h);
+    g.addColorStop(0, '#3a7bff');
+    g.addColorStop(1, 'rgba(255,170,60,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(x - 8, 562);
+    ctx.quadraticCurveTo(x, 562 - h * 2, x + 8, 562);
+    ctx.fill();
+  }
+  // 手前の木枠
+  ctx.fillStyle = '#7a4a22';
+  ctx.fillRect(0, 565, W, H - 565);
+  ctx.fillStyle = '#5d3615';
+  ctx.fillRect(0, 565, W, 6);
+}
+
+function drawSlots() {
+  for (const s of slots) {
+    if (s.phase === 'empty' || s.phase === 'taken') continue;
+    let ox = 0, oy = 0, wig = 0;
+    if (s.shake > 0) ox = Math.sin(s.shake * 60) * 4;
+    if (s.phase === 'done') {
+      const p = (elapsed - s.doneAt) / (s.deadline - s.doneAt);
+      ox += Math.sin(elapsed * 40) * (1 + p * 3);
+      oy += Math.sin(elapsed * 23) * p * 2;
+      // 光る輪（残り時間）
+      ctx.strokeStyle = p > 0.66 ? '#ff4040' : '#ffd23f';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 52, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - p));
+      ctx.stroke();
+      // キラキラ
+      ctx.fillStyle = '#fff6b0';
+      ctx.font = 'bold 18px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('！', s.x + 40, s.y - 28 + Math.sin(elapsed * 10) * 3);
+    }
+    const sc = s.phase === 'cooking' ? 0.85 + 0.15 * Math.min(1, s.cook * 1.5) : 1;
+    ctx.globalAlpha = s.phase === 'cooking' ? Math.min(1, 0.6 + s.cook) : 1;
+    drawTaiyaki(s.x + ox, s.y + oy, sc, s.cook, 0, 1, wig);
+    ctx.globalAlpha = 1;
+    if (s.phase === 'cooking') {
+      // 焼け具合バー
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      rr(s.x - 30, s.y + 40, 60, 6, 3); ctx.fill();
+      ctx.fillStyle = '#f0a030';
+      rr(s.x - 30, s.y + 40, 60 * s.cook, 6, 3); ctx.fill();
+    }
+  }
+}
+
+function drawTongs() {
+  const sx = 245, sy = 245; // 右肩
+  const tx = tongs.x, ty = tongs.y;
+  // 腕
+  ctx.strokeStyle = '#f4f1ea';
+  ctx.lineWidth = 26;
+  ctx.lineCap = 'round';
+  const mx = (sx + tx) / 2 + 20, my = Math.min(sy, ty) - 10;
+  const hx = tx + 10, hy = ty - 50;
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(mx, my, hx, hy); ctx.stroke();
+  ctx.strokeStyle = '#8a7a66';
+  ctx.lineWidth = 2;
+  // 手
+  ctx.fillStyle = '#f0c49c';
+  ctx.beginPath(); ctx.arc(hx, hy, 12, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#b07d55'; ctx.stroke();
+  // トング
+  const open = state === 'over' ? 2 : (tongs.target ? 9 : 5);
+  ctx.strokeStyle = '#c0c4cc';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(hx, hy); ctx.lineTo(tx - open, ty);
+  ctx.moveTo(hx, hy); ctx.lineTo(tx + open, ty);
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    const a = 1 - p.t / p.life;
+    if (p.steam) {
+      ctx.fillStyle = `rgba(255,255,255,${0.25 * a})`;
+      ctx.beginPath(); ctx.arc(p.x + Math.sin(p.t * 5) * 6, p.y, 6 + p.t * 8, 0, Math.PI * 2); ctx.fill();
+    } else if (p.bubble) {
+      ctx.strokeStyle = `rgba(180,230,255,${a})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3 + p.t * 6, 0, Math.PI * 2); ctx.stroke();
+    } else if (p.star) {
+      ctx.fillStyle = `rgba(255,230,80,${a})`;
+      drawStar(p.x, p.y, 5);
+    }
+  }
+}
+function drawStar(x, y, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = i * Math.PI / 5 - Math.PI / 2;
+    const rr2 = i % 2 ? r * 0.45 : r;
+    ctx.lineTo(x + Math.cos(a) * rr2, y + Math.sin(a) * rr2);
+  }
+  ctx.closePath(); ctx.fill();
+}
+
+function drawTexts() {
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const t of texts) {
+    ctx.globalAlpha = 1 - t.t;
+    ctx.font = 'bold 18px sans-serif';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#000';
+    ctx.strokeText(t.text, t.x, t.y - t.t * 40);
+    ctx.fillStyle = t.color;
+    ctx.fillText(t.text, t.x, t.y - t.t * 40);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHud() {
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px sans-serif';
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#3b2414';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'left';
+  const s = `にがした数 ${score}`;
+  ctx.strokeText(s, 12, 84); ctx.fillText(s, 12, 84);
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 14px sans-serif';
+  const b = `ベスト ${best}`;
+  ctx.strokeText(b, W - 12, 84); ctx.fillText(b, W - 12, 84);
+}
+
+function outlinedText(text, x, y, size, fill, stroke) {
+  ctx.font = `900 ${size}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = size / 5;
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = stroke;
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = fill;
+  ctx.fillText(text, x, y);
+}
+
+function drawTitle() {
+  ctx.fillStyle = 'rgba(30,15,5,0.6)';
+  ctx.fillRect(0, 0, W, H);
+  const t = performance.now() / 1000;
+  outlinedText('とべ！', W / 2, 150, 44, '#ffe066', '#7a3a10');
+  outlinedText('たいやきちゃん', W / 2, 205, 40, '#fff', '#7a3a10');
+  drawTaiyaki(W / 2, 290 + Math.sin(t * 3) * 10, 1.4, 1, Math.sin(t * 6) * 0.15, 1, t * 15);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.textAlign = 'center';
+  const lines = [
+    'たい焼きが焼けたら、',
+    'おじさんに取られる前に タップ！',
+    'たい焼きちゃんを にがしてあげよう。',
+    '',
+    '１匹でも取られたら ゲームオーバー',
+  ];
+  lines.forEach((l, i) => ctx.fillText(l, W / 2, 380 + i * 24));
+  if (Math.floor(t * 2) % 2 === 0) outlinedText('タップしてスタート', W / 2, 540, 24, '#fff', '#c33');
+}
+
+function drawOver() {
+  ctx.fillStyle = 'rgba(30,15,5,0.55)';
+  ctx.fillRect(0, 0, W, H);
+  outlinedText('ゲームオーバー', W / 2, 330, 36, '#fff', '#a01010');
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('おじさんに 取られちゃった…', W / 2, 375);
+  outlinedText(`にがした数　${score} 匹`, W / 2, 425, 28, '#ffe066', '#7a3a10');
+  if (score >= best && score > 0) outlinedText('ベスト記録！', W / 2, 465, 20, '#7fffd4', '#0a4a3a');
+  else {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillText(`ベスト ${best} 匹`, W / 2, 465);
+  }
+  if (performance.now() - overAt > 900 && Math.floor(performance.now() / 500) % 2 === 0) {
+    outlinedText('タップでもう一回', W / 2, 530, 22, '#fff', '#c33');
+  }
+}
+
+function draw() {
+  drawBackground();
+  drawOjisan();
+  drawPlate();
+  drawSlots();
+  drawParticles();
+  // 取られたたい焼き
+  if (state === 'over' && caughtSlot) {
+    drawTaiyaki(tongs.x, tongs.y + 14, 1, 1, 0.2, 1, performance.now() / 40);
+  }
+  if (state !== 'title') drawTongs();
+  for (const f of flyers) drawTaiyaki(f.x, f.y, 1, 1, f.rot, f.dir, f.t * 25);
+  drawTexts();
+  drawHud();
+  if (state === 'title') drawTitle();
+  if (state === 'over') drawOver();
+}
+
+// ===================== ループ =====================
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+document.addEventListener('visibilitychange', () => {
+  if (!Sound.ctx) return;
+  if (document.hidden) Sound.ctx.suspend(); else Sound.ctx.resume();
+});
+}
+</script>
+</body>
+</html>
