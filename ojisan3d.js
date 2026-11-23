@@ -199,6 +199,11 @@ export function createOjisan(opts) {
   mouthH.position.set(0, -30, 46);
   mouthH.scale.set(1, 1, 0.5);
   head.add(mouthH);
+  // びっくりした「お」の口
+  const mouthO = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), mouthM);
+  mouthO.scale.set(8, 10, 4);
+  mouthO.position.set(0, -33, 47);
+  head.add(mouthO);
   const headPivot = new THREE.Group();
   headPivot.position.set(0, 0, 0);
   headPivot.add(head);
@@ -310,7 +315,7 @@ export function createOjisan(opts) {
     arm.thumb.rotation.set(arm.side * (0.5 - grip * 0.4), arm.side * (0.6 - grip * 0.5), -0.3 - grip * 0.6);
   }
 
-  const state = { blink: 0, nextBlink: 2 };
+  const state = { blink: 0, nextBlink: 2, hx: 0.06, hy: 0 };
 
   function update(dt, s) {
     // s: { tips:[{x,y,z,grip,reach}], look:{x,y}|null, mood, t }
@@ -338,8 +343,19 @@ export function createOjisan(opts) {
       rx = 0.12 + Math.min(0.3, (s.look.y - 300) / 900);
     }
     if (s.mood === 'happy') { ry *= 0.3; rx = -0.08 + Math.sin(t * 10) * 0.04; }
-    headPivot.rotation.y += (ry - headPivot.rotation.y) * Math.min(1, dt * 7);
-    headPivot.rotation.x += (rx - headPivot.rotation.x) * Math.min(1, dt * 7);
+    state.hy += (ry - state.hy) * Math.min(1, dt * 7);
+    state.hx += (rx - state.hx) * Math.min(1, dt * 7);
+    headPivot.rotation.y = state.hy;
+    headPivot.rotation.x = state.hx;
+    // 気球がぶつかった：反対側へのけぞって、ぷるぷる
+    let bk = 0;
+    if (s.bonk && s.bonk.t > 0) {
+      const el = s.bonk.len - s.bonk.t;
+      bk = Math.sin(Math.min(1, el / 0.12) * Math.PI / 2) * Math.min(1, s.bonk.t / 0.5);
+    }
+    headPivot.rotation.z = (s.bonk ? s.bonk.dir : 0) * 0.32 * bk + Math.sin(t * 38) * 0.05 * bk;
+    headPivot.rotation.x -= 0.28 * bk;
+    headPivot.position.x = (s.bonk ? s.bonk.dir : 0) * 10 * bk;
     // 目線
     const px = s.look ? Math.max(-1, Math.min(1, (s.look.x - 180) / 120)) * 3.5 : 0;
     const py = s.look ? -2.5 : 0;
@@ -348,18 +364,19 @@ export function createOjisan(opts) {
     state.nextBlink -= dt;
     if (state.nextBlink <= 0) { state.blink = 0.14; state.nextBlink = 2 + Math.random() * 3; }
     state.blink = Math.max(0, state.blink - dt);
-    const open = s.mood === 'happy' ? 0.15 : state.blink > 0 ? 0.1 : (s.mood === 'focus' ? 0.8 : 1);
+    const open = s.mood === 'bonk' ? 0.08 : s.mood === 'happy' ? 0.15 : state.blink > 0 ? 0.1 : (s.mood === 'focus' ? 0.8 : 1);
     eyes.forEach(e => { e.scale.y = 8.5 * open; });
     pupils.forEach(p => { p.visible = open > 0.3; });
     // 眉
-    const tilt = s.mood === 'focus' ? 0.28 : s.mood === 'happy' ? -0.2 : 0.05;
+    const tilt = s.mood === 'focus' ? 0.28 : s.mood === 'happy' ? -0.2 : s.mood === 'bonk' ? -0.35 : 0.05;
     brows.forEach((b, i) => {
       const sx = i ? 1 : -1;
       b.rotation.z = Math.PI / 2 + sx * tilt;
-      b.position.y = 19 + (s.mood === 'happy' ? 4 : 0);
+      b.position.y = 19 + (s.mood === 'happy' ? 4 : s.mood === 'bonk' ? 7 : 0);
     });
-    mouthN.visible = s.mood !== 'happy';
+    mouthN.visible = s.mood !== 'happy' && s.mood !== 'bonk';
     mouthH.visible = s.mood === 'happy';
+    mouthO.visible = s.mood === 'bonk';
     // 腕
     s.tips.forEach((tp, i) => {
       // 手を伸ばしはじめたら腕は機械の上を越えるので、全部手前に描く

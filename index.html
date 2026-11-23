@@ -16,6 +16,12 @@
   }
   body { display: flex; align-items: center; justify-content: center; }
   canvas { display: block; }
+  #lang {
+    position: fixed; right: 62px; bottom: 10px;
+    width: 44px; height: 44px; border-radius: 22px;
+    border: 2px solid #fff3; background: #0006; color: #fff;
+    font: bold 14px sans-serif; cursor: pointer;
+  }
   #mute {
     position: fixed; right: 10px; bottom: 10px;
     width: 44px; height: 44px; border-radius: 22px;
@@ -26,7 +32,8 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<button id="mute" aria-label="音のオン・オフ">♪</button>
+<button id="mute" aria-label="Sound on/off">♪</button>
+<button id="lang" aria-label="Language">EN</button>
 <script type="module">
 import { createTaiyakiSprites, renderPlate } from './taiyaki3d.js';
 import { createOjisan } from './ojisan3d.js';
@@ -61,6 +68,61 @@ let oj = null;
 try { oj = createOjisan({ W, top: 80, bottom: 640, res: Math.min(1.6, (window.devicePixelRatio || 1) * Math.min(1.2, scale)) }); }
 catch (e) { console.warn('おじさんの3D描画が使えないので2Dで表示します', e); oj = null; }
 const K = PX_PER_UNIT / 41; // 2D の飾りの大きさ
+
+// ===================== ことば（日本語 / English） =====================
+const I18N = {
+  ja: {
+    docTitle: 'とべ！たいやきちゃん',
+    title1: 'とべ！', title2: 'たいやきちゃん',
+    howto: ['たい焼きが焼けたら、', 'おじさんに取られる前に タップ！', 'たい焼きちゃんを 昇天させてあげよう。', '', '１匹でも取られたら ゲームオーバー'],
+    tapStart: 'タップしてスタート',
+    saved: n => `にがした数 ${n}`, best: n => `ベスト ${n}`,
+    gameOver: 'ゲームオーバー', caught: 'おじさんに 取られちゃった…',
+    savedTotal: n => `にがした数　${n} 匹`, newBest: 'ベスト記録！', bestTotal: n => `ベスト ${n} 匹`,
+    retry: 'タップでもう一回',
+    notYet: 'まだ！', closeCall: 'ギリギリ昇天!',
+    escapes: ['しょうてん〜', 'さようなら〜', '天国へ〜', 'お達者で〜', 'ありがとう〜'],
+    ojReady: 'よし、\n焼けたな…', ojDone: 'へい、\nいっちょあがり！',
+    bonks: ['うわっ！', 'なんだぁ!?', 'ぶほっ', 'まぶしっ！', 'じゃまだよ！', 'おわっ！？'],
+    langBtn: 'EN',
+  },
+  en: {
+    docTitle: 'Fly Away, Taiyaki-chan!',
+    title1: 'Fly Away!', title2: 'Taiyaki-chan',
+    howto: ['When a taiyaki is done,', 'tap it before the old man grabs it', 'and send it up to heaven!', '', 'If he takes even one, game over.'],
+    tapStart: 'Tap to start',
+    saved: n => `Saved ${n}`, best: n => `Best ${n}`,
+    gameOver: 'GAME OVER', caught: 'The old man got one…',
+    savedTotal: n => `Saved: ${n}`, newBest: 'New record!', bestTotal: n => `Best: ${n}`,
+    retry: 'Tap to play again',
+    notYet: 'Not yet!', closeCall: 'Just in time!',
+    escapes: ['Ascending~', 'Farewell~', 'Off to heaven~', 'Take care~', 'Thank you~'],
+    ojReady: 'Alright,\nthis one\'s done…', ojDone: 'There ya go,\none order up!',
+    bonks: ['Whoa!', 'What the!?', 'Pfft!', 'Too bright!', 'Outta my way!', 'Huh!?'],
+    langBtn: '日本',
+  },
+};
+let lang = 'ja';
+try {
+  const saved = localStorage.getItem('taiyaki-lang');
+  lang = saved || ((navigator.language || 'ja').toLowerCase().startsWith('ja') ? 'ja' : 'en');
+} catch (e) { lang = (navigator.language || 'ja').toLowerCase().startsWith('ja') ? 'ja' : 'en'; }
+if (!I18N[lang]) lang = 'en';
+const T = () => I18N[lang];
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const langBtn = document.getElementById('lang');
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.title = T().docTitle;
+  langBtn.textContent = T().langBtn;
+}
+applyLang();
+langBtn.addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  lang = lang === 'ja' ? 'en' : 'ja';
+  try { localStorage.setItem('taiyaki-lang', lang); } catch (err) {}
+  applyLang();
+});
 
 // ===================== 保存 =====================
 function loadBest() {
@@ -345,6 +407,22 @@ const Sound = {
     s.connect(f); f.connect(g); g.connect(this.sfxGain);
     s.start(t); s.stop(t + 0.4);
   },
+  // 顔にぶつかった「ぼよ〜ん」
+  boing() {
+    if (!this.ctx) return;
+    const c = this.ctx, t = c.currentTime;
+    const o = c.createOscillator(), g = c.createGain(), l = c.createOscillator(), lg = c.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(220, t);
+    o.frequency.exponentialRampToValueAtTime(110, t + 0.5);
+    l.frequency.value = 14; lg.gain.value = 40;
+    l.connect(lg); lg.connect(o.frequency);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.4, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+    o.connect(g); g.connect(this.sfxGain);
+    o.start(t); l.start(t); o.stop(t + 0.6); l.stop(t + 0.6);
+  },
   // 昇天：ぽわんと気球がふくらみ、天の和音
   ascend() {
     if (!this.ctx) return;
@@ -509,6 +587,7 @@ const PH = { pour: 0.55, anko: 0.5, pour2: 0.45, closing: 0.35, opening: 0.3 };
 let state = 'title'; // title | play | over
 let slots, flyers, particles, texts, score, best = loadBest(), elapsed, overAt, caughtSlot;
 let tongs, hands;
+let bonk = { t: 0, len: 1, dir: 1, text: '' };
 const PLATE_Z = 140;
 const BALLOON_COLORS = [['#e8463a', '#f8f1e4'], ['#2f6fd0', '#ffd23f'], ['#4cae5c', '#f8f1e4'], ['#ef7fa8', '#fff6fa'], ['#8a5cd0', '#ffd23f'], ['#f39a2b', '#fff3d6']];
 const minJerk = p => p * p * p * (10 - 15 * p + 6 * p * p);
@@ -526,6 +605,7 @@ function reset() {
   slots.forEach(chooseSide);
   flyers = [];
   particles = [];
+  bonk = { t: 0, len: 1, dir: 1, text: '' };
   texts = [];
   score = 0;
   elapsed = 0;
@@ -590,7 +670,7 @@ canvas.addEventListener('pointerdown', e => {
     if (hit.shake > 0) return;
     hit.shake = 0.5;
     Sound.poke();
-    texts.push({ x: hit.x, y: hit.y - 30, text: 'まだ！', t: 0, color: '#fff' });
+    texts.push({ x: hit.x, y: hit.y - 30, text: T().notYet, t: 0, color: '#fff' });
   }
 });
 
@@ -610,7 +690,7 @@ function escape(s) {
     const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 140;
     particles.push({ x: s.x, y: s.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60, t: 0, life: 0.6, star: true });
   }
-  const msg = timeLeft < win * 0.25 ? 'ギリギリ昇天!' : ['しょうてん〜', 'さようなら〜', '天国へ〜', 'お達者で〜', 'ありがとう〜'][Math.floor(Math.random() * 5)];
+  const msg = timeLeft < win * 0.25 ? T().closeCall : pick(T().escapes);
   texts.push({ x: s.x, y: s.y - 30, text: msg, t: 0, color: '#ffe066' });
   s.phase = 'empty';
   s.wait = 0.4 + Math.random() * 1.2;
@@ -745,7 +825,27 @@ function update(dt) {
     if (f.t > 0.5) {
       const v = Math.min(34, 6 + (f.t - 0.5) * 9);
       f.y -= v * dt;
+      f.x0 += (f.push || 0) * dt;
+      f.push = (f.push || 0) * Math.exp(-dt * 1.5);
       f.x = f.x0 + Math.sin(f.t * 0.8 + f.seed) * 10 * Math.min(1, (f.t - 0.5) / 2);
+    }
+    // おじさんの顔にぶつかった？（顔のまわり＝だ円、気球の球皮とかご）
+    if (!f.hit && f.t > 0.5) {
+      const hitHead = (px, py, r) => {
+        const dx = (px - 180) / (58 + r), dy = (py - 165) / (64 + r);
+        return dx * dx + dy * dy < 1;
+      };
+      if (hitHead(f.x, f.y - 78, 28) || hitHead(f.x, f.y - 4, 14)) {
+        f.hit = true;
+        const side = f.x < 180 ? -1 : 1; // 気球は外へ押し返される
+        f.push = side * 55;
+        bonk = { t: 1.3, len: 1.3, dir: -side, text: pick(T().bonks) };
+        Sound.boing();
+        for (let k = 0; k < 6; k++) {
+          const a = -Math.PI / 2 + (Math.random() - 0.5) * 2;
+          particles.push({ x: 180 - side * 30, y: 110, vx: Math.cos(a) * 80, vy: Math.sin(a) * 80, t: 0, life: 0.5, star: true });
+        }
+      }
     }
     if (Math.random() < dt * 2) particles.push({ x: f.x + (Math.random() - 0.5) * 50, y: f.y - 60 + (Math.random() - 0.5) * 60, vx: 0, vy: -10, t: 0, life: 1.2, sparkle: true });
   }
@@ -755,6 +855,7 @@ function update(dt) {
     if (p.star) p.vy += 300 * dt;
   }
   particles = particles.filter(p => p.t < p.life);
+  bonk.t = Math.max(0, bonk.t - dt);
   for (const t of texts) t.t += dt;
   texts = texts.filter(t => t.t < 1);
 }
@@ -1019,10 +1120,14 @@ function drawOjisanBubble() {
   const cx = 180;
   const danger = dangerLevel();
   const happy = state === 'over';
-  if (state === 'play' && danger > 0.15) {
-    drawBubble(cx - 112, 135, 'よし、\n焼けたな…');
+  if (state === 'play' && bonk.t > 0.15) {
+    drawBubble(cx - 112, 135, bonk.text);
+    return;
   }
-  if (happy) drawBubble(cx - 112, 135, 'へい、\nいっちょあがり！');
+  if (state === 'play' && danger > 0.15) {
+    drawBubble(cx - 112, 135, T().ojReady);
+  }
+  if (happy) drawBubble(cx - 112, 135, T().ojDone);
 }
 
 function drawBubble(x, y, text) {
@@ -1444,24 +1549,20 @@ function drawBalloon(f) {
   ctx.translate(x, y);
   ctx.rotate(tilt);
   ctx.translate(-x, -y);
-  // ロープ
+  // たい焼きを直接吊るす（振り子のようにゆれる）
+  const sw = Math.sin(f.t * 1.7 + f.seed) * 0.16 * Math.min(1, f.t / 0.8) + (f.push || 0) * 0.004;
+  const px = x, py = y - 22; // 吊り下げの支点
+  const rot = (lx, ly) => [px + lx * Math.cos(sw) - ly * Math.sin(sw), py + lx * Math.sin(sw) + ly * Math.cos(sw)];
+  const a1 = rot(-11 * f.face, 9), a2 = rot(8 * f.face, 8);
   ctx.globalAlpha = inf * over;
   ctx.strokeStyle = '#6b5233';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1.1;
   ctx.beginPath();
-  ctx.moveTo(x - 9 * sc, ey + 34 * sc); ctx.lineTo(x - 12, y - 7);
-  ctx.moveTo(x + 9 * sc, ey + 34 * sc); ctx.lineTo(x + 12, y - 7);
-  ctx.moveTo(x - 4 * sc, ey + 36 * sc); ctx.lineTo(x - 4, y - 7);
-  ctx.moveTo(x + 4 * sc, ey + 36 * sc); ctx.lineTo(x + 4, y - 7);
+  ctx.moveTo(x - 8 * sc, ey + 34 * sc); ctx.lineTo(px, py);
+  ctx.moveTo(x + 8 * sc, ey + 34 * sc); ctx.lineTo(px, py);
+  ctx.moveTo(px, py); ctx.lineTo(a1[0], a1[1]);
+  ctx.moveTo(px, py); ctx.lineTo(a2[0], a2[1]);
   ctx.stroke();
-  // バーナーの炎
-  if (f.t > 0.4 && Math.sin(f.t * 3 + f.seed) > 0.2) {
-    const fl = 6 + Math.random() * 4;
-    const g = ctx.createLinearGradient(0, y - 20, 0, y - 20 - fl);
-    g.addColorStop(0, '#3a7bff'); g.addColorStop(0.4, '#ffd23f'); g.addColorStop(1, 'rgba(255,120,30,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.moveTo(x - 3, y - 18); ctx.quadraticCurveTo(x, y - 20 - fl * 2, x + 3, y - 18); ctx.fill();
-  }
   ctx.globalAlpha = over;
   // 球皮
   ctx.save();
@@ -1503,27 +1604,21 @@ function drawBalloon(f) {
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.restore();
-  // たい焼き（かごに乗って、しっぽが出ている）
-  drawTaiyaki(x + f.face * 3, y - 10, 0.62, 1, -0.15 * f.face, f.face, 0);
-  // 天使の輪
+  // 吊るされたたい焼き
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(sw);
+  drawTaiyaki(0, 20, 0.82, 1, 0, f.face, 0);
+  // ロープの結び目
+  ctx.fillStyle = '#6b5233';
+  ctx.beginPath(); ctx.arc(0, 0, 1.8, 0, Math.PI * 2); ctx.fill();
+  // 天使の輪（頭の上）
   if (f.t > 0.35) {
     ctx.strokeStyle = `rgba(255,215,80,${Math.min(1, (f.t - 0.35) * 3)})`;
     ctx.lineWidth = 2.2;
-    ctx.beginPath(); ctx.ellipse(x + f.face * 12, y - 30 + Math.sin(f.t * 3) * 1.2, 9, 3, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(f.face * 22, 2 + Math.sin(f.t * 3) * 1.2, 8, 2.8, 0, 0, Math.PI * 2); ctx.stroke();
   }
-  // かご（籐編み）
-  const bg = ctx.createLinearGradient(0, y - 8, 0, y + 10);
-  bg.addColorStop(0, '#c08a4a'); bg.addColorStop(1, '#7a4e22');
-  ctx.fillStyle = bg;
-  ctx.beginPath();
-  ctx.moveTo(x - 15, y - 8); ctx.lineTo(x + 15, y - 8); ctx.lineTo(x + 12, y + 10); ctx.lineTo(x - 12, y + 10);
-  ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = 'rgba(70,40,15,0.6)';
-  ctx.lineWidth = 0.8;
-  for (let k = -12; k <= 12; k += 4) { ctx.beginPath(); ctx.moveTo(x + k, y - 8); ctx.lineTo(x + k * 0.8, y + 10); ctx.stroke(); }
-  for (let k = -4; k <= 8; k += 4) { ctx.beginPath(); ctx.moveTo(x - 15 + (k + 8) * 0.17, y + k); ctx.lineTo(x + 15 - (k + 8) * 0.17, y + k); ctx.stroke(); }
-  ctx.fillStyle = '#5a3412';
-  rr(x - 16, y - 10, 32, 4, 2); ctx.fill();
+  ctx.restore();
   ctx.restore();
   ctx.globalAlpha = 1;
 }
@@ -1578,11 +1673,11 @@ function drawHud() {
   ctx.strokeStyle = '#3b2414';
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'left';
-  const s = `にがした数 ${score}`;
+  const s = T().saved(score);
   ctx.strokeText(s, 12, 84); ctx.fillText(s, 12, 84);
   ctx.textAlign = 'right';
   ctx.font = 'bold 14px sans-serif';
-  const b = `ベスト ${best}`;
+  const b = T().best(best);
   ctx.strokeText(b, W - 12, 84); ctx.fillText(b, W - 12, 84);
 }
 
@@ -1601,40 +1696,34 @@ function drawTitle() {
   ctx.fillStyle = 'rgba(30,15,5,0.6)';
   ctx.fillRect(0, 0, W, H);
   const t = performance.now() / 1000;
-  outlinedText('とべ！', W / 2, 150, 44, '#ffe066', '#7a3a10');
-  outlinedText('たいやきちゃん', W / 2, 205, 40, '#fff', '#7a3a10');
+  outlinedText(T().title1, W / 2, 150, 44, '#ffe066', '#7a3a10');
+  outlinedText(T().title2, W / 2, 205, 40, '#fff', '#7a3a10');
   drawTaiyaki(W / 2, 290 + Math.sin(t * 3) * 10, 1.4, 1, Math.sin(t * 6) * 0.15, 1, t * 15);
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 15px sans-serif';
   ctx.textAlign = 'center';
-  const lines = [
-    'たい焼きが焼けたら、',
-    'おじさんに取られる前に タップ！',
-    'たい焼きちゃんを にがしてあげよう。',
-    '',
-    '１匹でも取られたら ゲームオーバー',
-  ];
+  const lines = T().howto;
   lines.forEach((l, i) => ctx.fillText(l, W / 2, 380 + i * 24));
-  if (Math.floor(t * 2) % 2 === 0) outlinedText('タップしてスタート', W / 2, 540, 24, '#fff', '#c33');
+  if (Math.floor(t * 2) % 2 === 0) outlinedText(T().tapStart, W / 2, 540, 24, '#fff', '#c33');
 }
 
 function drawOver() {
   ctx.fillStyle = 'rgba(30,15,5,0.55)';
   ctx.fillRect(0, 0, W, H);
-  outlinedText('ゲームオーバー', W / 2, 330, 36, '#fff', '#a01010');
+  outlinedText(T().gameOver, W / 2, 330, 36, '#fff', '#a01010');
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 16px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('おじさんに 取られちゃった…', W / 2, 375);
-  outlinedText(`にがした数　${score} 匹`, W / 2, 425, 28, '#ffe066', '#7a3a10');
-  if (score >= best && score > 0) outlinedText('ベスト記録！', W / 2, 465, 20, '#7fffd4', '#0a4a3a');
+  ctx.fillText(T().caught, W / 2, 375);
+  outlinedText(T().savedTotal(score), W / 2, 425, 28, '#ffe066', '#7a3a10');
+  if (score >= best && score > 0) outlinedText(T().newBest, W / 2, 465, 20, '#7fffd4', '#0a4a3a');
   else {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 15px sans-serif';
-    ctx.fillText(`ベスト ${best} 匹`, W / 2, 465);
+    ctx.fillText(T().bestTotal(best), W / 2, 465);
   }
   if (performance.now() - overAt > 900 && Math.floor(performance.now() / 500) % 2 === 0) {
-    outlinedText('タップでもう一回', W / 2, 530, 22, '#fff', '#c33');
+    outlinedText(T().retry, W / 2, 530, 22, '#fff', '#c33');
   }
 }
 
@@ -1649,7 +1738,8 @@ function draw() {
       t: performance.now() / 1000,
       tips: hands.map(h => ({ x: h.x, y: h.y, z: h.z, grip: h.grip, reach: h.reach })),
       look,
-      mood: state === 'over' ? 'happy' : danger > 0.3 ? 'focus' : 'normal',
+      mood: state === 'over' ? 'happy' : bonk.t > 0.15 ? 'bonk' : danger > 0.3 ? 'focus' : 'normal',
+      bonk,
     });
     ctx.drawImage(oj.renderBody(), 0, oj.top, W, oj.height);
   } else {
