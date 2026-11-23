@@ -4,7 +4,6 @@
     <string name="title_activity_main">たいやきちゃん</string>
     <string name="package_name">jp.techgym.taiyaki</string>
     <string name="custom_url_scheme">jp.techgym.taiyaki</string>
-    <!-- AdMob のアプリ ID。AdMob に「とべ！たいやきちゃん」(Android) を登録したら本番の ID に差し替える。
-         いまは Google 公式のサンプル用アプリ ID(テスト広告用) -->
-    <string name="admob_app_id">ca-app-pub-3940256099942544~3347511713</string>
+    <!-- AdMob のアプリ ID(「とべ！たいやきちゃん」Android) -->
+    <string name="admob_app_id">ca-app-pub-6411535997477460~9827050711</string>
 </resources>

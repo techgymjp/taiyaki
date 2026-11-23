@@ -10,11 +10,11 @@ window.Ads = (() => {
         rewarded: 'ca-app-pub-3940256099942544/5224354917',
         banner: 'ca-app-pub-3940256099942544/6300978111',
       },
-      // 本番の広告ユニット(AdMob の「とべ！たいやきちゃん」Android)。AdMob で作ったら ID を入れる。空の種類は本番ビルドでは出さない
+      // 本番の広告ユニット(AdMob の「とべ！たいやきちゃん」Android)。空の種類は本番ビルドでは出さない
       production: {
-        interstitial: '',
-        rewarded: '',
-        banner: '',
+        interstitial: 'ca-app-pub-6411535997477460/6174038320',
+        rewarded: 'ca-app-pub-6411535997477460/6490440935',
+        banner: 'ca-app-pub-6411535997477460/5943646023',
       },
     },
     ios: {

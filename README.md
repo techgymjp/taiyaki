@@ -52,7 +52,7 @@ npm run android:open   # Android Studio で開く
 | 全画面広告 | 「プレイ」（タイトル・あそびかたから）、「タイトルへ」（あそびかた・ポーズ・結果から）、ポーズからの「再開」、結果画面の「もう一度」のたび |
 | リワード広告 | おじさんに取られたとき、見ると取られたたい焼きを型に取り返せる（1 ゲーム 3 回まで。点数はもらえず、自分でもう一度逃がす） |
 
-本番の広告ユニット ID は `ads.js`、AdMob のアプリ ID は `android/app/src/main/res/values/strings.xml` に入れます（いまはテスト用）。
+本番の広告ユニット ID は `ads.js`、AdMob のアプリ ID は `android/app/src/main/res/values/strings.xml` にあります。
 
 ## ライセンス
 
