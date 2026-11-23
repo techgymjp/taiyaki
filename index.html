@@ -29,6 +29,7 @@
 <button id="mute" aria-label="音のオン・オフ">♪</button>
 <script type="module">
 import { createTaiyakiSprites, renderPlate } from './taiyaki3d.js';
+import { createOjisan } from './ojisan3d.js';
 {
 
 // ===================== 画面 =====================
@@ -55,7 +56,11 @@ try {
   sprites = createTaiyakiSprites();
   if (sprites) sprites.warm();
 } catch (e) { console.warn('3D描画が使えないので2Dで表示します', e); sprites = null; }
-const PX_PER_UNIT = 41;
+const PX_PER_UNIT = 31;
+let oj = null;
+try { oj = createOjisan({ W, top: 80, bottom: 640, res: Math.min(1.6, (window.devicePixelRatio || 1) * Math.min(1.2, scale)) }); }
+catch (e) { console.warn('おじさんの3D描画が使えないので2Dで表示します', e); oj = null; }
+const K = PX_PER_UNIT / 41; // 2D の飾りの大きさ
 
 // ===================== 保存 =====================
 function loadBest() {
@@ -434,46 +439,79 @@ muteBtn.addEventListener('pointerdown', e => {
 
 // ===================== ゲーム状態 =====================
 const SLOTS = [];
-// 業務用たい焼き機：左右の型で挟んで焼く。1段＝1匹（左がふた、右が受け）
+// 業務用たい焼き機を2台：4列4段の型。左右の型で挟んで焼き、出来上がりは左右どちらかの型に
 const ROWS = [342, 401, 460, 519];
-const LX = 101, RX = 259, HINGE = 180;
-const LID_W = 146, LID_H = 56;
-for (const y of ROWS) SLOTS.push({ x: RX, y, lx: LX });
-const LIDS = ROWS.map(y => ({ x: 28, y: y - 28, w: LID_W, h: LID_H }));
-const PLATES = [...LIDS, { x: 186, y: 312, w: 146, h: 236 }];
-const MOLDS = [...ROWS.map(y => ({ x: LX, y, flip: true })), ...ROWS.map(y => ({ x: RX, y }))];
-const BOLTS = [...LIDS.flatMap(l => [{ x: l.x + 7, y: l.y + 7 }, { x: l.x + 7, y: l.y + l.h - 7 }]),
-  { x: 325, y: 319 }, { x: 325, y: 541 }];
+const COL_W = 78, CELL_H = 56;
+const MACHINES = [{ hinge: 90, cells: [10, 92] }, { hinge: 270, cells: [190, 272] }];
+const PLATE_X = 8, PLATE_Y = 306, PLATE_W = 344, PLATE_H = 248;
+const PLATES = [], MOLDS = [], BOLTS = [];
+MACHINES.forEach((m, mi) => {
+  for (const y of ROWS) {
+    const cells = m.cells.map(x => ({ x, y: y - CELL_H / 2, w: COL_W, h: CELL_H }));
+    cells.forEach((c, side) => {
+      PLATES.push(c);
+      MOLDS.push({ x: c.x + c.w / 2, y, flip: side === 0 });
+      const bx = side === 0 ? c.x + 6 : c.x + c.w - 6;
+      BOLTS.push({ x: bx, y: c.y + 6 }, { x: bx, y: c.y + c.h - 6 });
+    });
+    SLOTS.push({ m: mi, hinge: m.hinge, y, cells, xs: cells.map(c => c.x + c.w / 2), outer: mi === 0 ? 0 : 1 });
+  }
+});
+// 取っ手の位置（型の外側のふち）
+function handleOf(s, side) {
+  const c = s.cells[side];
+  const left = c.x + c.w / 2 < s.hinge;
+  return { x: left ? c.x : c.x + c.w, dir: left ? -1 : 1, sc: side === s.outer ? 1 : 0.65 };
+}
+function drawHandleOf(s, side) {
+  const h = handleOf(s, side);
+  drawHandle(h.x, s.y, h.dir, h.sc);
+}
+// 毎回どちら側を受けにするか決める（もう片方がふたになる）
+function chooseSide(s) {
+  s.base = Math.random() < 0.5 ? 0 : 1;
+  s.x = s.xs[s.base];
+  s.lx = s.xs[1 - s.base];
+  s.face = s.base === 0 ? -1 : 1;
+  s.lid = s.cells[1 - s.base];
+}
 // 1段の流れ
 const PH = { pour: 0.55, anko: 0.5, pour2: 0.45, closing: 0.35, opening: 0.3 };
 
 let state = 'title'; // title | play | over
 let slots, flyers, particles, texts, score, best = loadBest(), elapsed, overAt, caughtSlot;
-let tongs;
+let tongs, hands;
+const PLATE_Z = 140;
+const minJerk = p => p * p * p * (10 - 15 * p + 6 * p * p);
 
 function reset() {
+  const order = SLOTS.map((_, i) => i).sort(() => Math.random() - 0.5);
   slots = SLOTS.map((p, i) => ({
-    i, x: p.x, y: p.y,
-    lx: p.lx,
+    ...p, i,
     phase: 'empty', t: 0,
-    wait: 0.3 + Math.random() * 1.2 + i * 0.6,
+    wait: 0.3 + Math.random() * 0.8 + order.indexOf(i) * 0.7,
     cook: 0, cookTime: 4,
     doneAt: 0, deadline: 0,
     shake: 0,
   }));
+  slots.forEach(chooseSide);
   flyers = [];
   particles = [];
   texts = [];
   score = 0;
   elapsed = 0;
   caughtSlot = null;
-  tongs = { x: 285, y: 300, target: null, fromX: 285, fromY: 300, startT: 0, lift: 0 };
+  tongs = { x: 285, y: 300, target: null, startT: 0 };
+  hands = [0, 1].map(i => {
+    const idle = { x: i ? 248 : 112, y: 298, z: 60 };
+    return { i, idle, x: idle.x, y: idle.y, z: idle.z, from: { ...idle }, target: null, startT: 0, p: 0, grip: 0.35, reach: 0, lift: 0 };
+  });
 }
 reset();
 
 // 難易度
 function cookTimeNow() {
-  const base = Math.max(1.6, 4.2 - elapsed * 0.035 - score * 0.02);
+  const base = Math.max(2.4, 5.2 - elapsed * 0.03 - score * 0.02);
   return base * (0.8 + Math.random() * 0.5);
 }
 function grabWindowNow() {
@@ -512,7 +550,7 @@ canvas.addEventListener('pointerdown', e => {
   // 一番近いたい焼きを探す
   let hit = null, bestD = Infinity;
   for (const s of slots) {
-    const dx = (x - s.x) / 60, dy = (y - s.y) / 29;
+    const dx = (x - s.x) / 42, dy = (y - s.y) / 28;
     const d = dx * dx + dy * dy;
     if (d < 1 && d < bestD) { bestD = d; hit = s; }
   }
@@ -533,7 +571,7 @@ function escape(s) {
   const win = s.deadline - s.doneAt;
   score++;
   Sound.jump();
-  const dir = s.x < 180 ? -1 : s.x > 180 ? 1 : (Math.random() < 0.5 ? -1 : 1);
+  const dir = s.x < 180 ? -1 : 1;
   flyers.push({
     x: s.x, y: s.y, vx: dir * (60 + Math.random() * 60), vy: -520,
     rot: 0, vr: dir * 2, t: 0, dir,
@@ -547,7 +585,6 @@ function escape(s) {
   s.phase = 'empty';
   s.wait = 0.4 + Math.random() * 1.2;
   s.cook = 0;
-  if (tongs.target === s) tongs.target = null;
 }
 
 // ===================== 更新 =====================
@@ -562,6 +599,7 @@ function update(dt) {
         s.wait -= dt;
         if (s.wait <= 0) {
           // ① 片側に皮（生地）を流し込む
+          chooseSide(s);
           next('pour');
           s.cook = 0;
           s.cookTime = cookTimeNow();
@@ -588,7 +626,7 @@ function update(dt) {
         const rate = 6 + 22 * Math.sin(Math.PI * Math.min(1, s.cook));
         if (Math.random() < dt * rate) Sound.crackle(s.cook < 0.6);
         // 閉じた型のすきまから湯気
-        if (Math.random() < dt * 4) particles.push({ x: s.x + (Math.random() - 0.5) * 120, y: s.y - 24, vx: 0, vy: -30, t: 0, life: 1.2, steam: true });
+        if (Math.random() < dt * 4) particles.push({ x: s.x + (Math.random() - 0.5) * 60, y: s.y - 20, vx: 0, vy: -30, t: 0, life: 1.2, steam: true });
         if (s.cook >= 1) {
           s.cook = 1;
           next('opening'); // ⑥ 焼けたら開く
@@ -598,29 +636,67 @@ function update(dt) {
         if (elapsed >= s.deadline) { gameOver(s); break; }
       }
     }
-    // おじさんのトング：一番締め切りの近いたい焼きを狙う
+    // おじさんの手：左右それぞれ、近い側で一番あぶないたい焼きを取りに行く
     if (state === 'play') {
-      let target = null;
-      for (const s of slots) if (s.phase === 'done' && (!target || s.deadline < target.deadline)) target = s;
-      if (target !== tongs.target) {
-        tongs.target = target;
-        tongs.fromX = tongs.x; tongs.fromY = tongs.y; tongs.startT = elapsed;
-      }
-      if (target) {
-        const p = Math.min(1, (elapsed - tongs.startT) / Math.max(0.01, target.deadline - tongs.startT));
-        const e = p * p * (3 - 2 * p);
-        tongs.x = tongs.fromX + (target.x - tongs.fromX) * e;
-        tongs.y = tongs.fromY + (target.y - 12 - tongs.fromY) * e;
-      } else {
-        tongs.x += (285 - tongs.x) * Math.min(1, dt * 6);
-        tongs.y += (300 - tongs.y) * Math.min(1, dt * 6);
+      for (const h of hands) {
+        let target = null;
+        for (const s of slots) {
+          if (s.phase !== 'done' || (s.x < 180) !== (h.i === 0)) continue;
+          if (!target || s.deadline < target.deadline) target = s;
+        }
+        if (target !== h.target) {
+          h.target = target;
+          h.from = { x: h.x, y: h.y, z: h.z };
+          h.startT = elapsed;
+        }
+        if (target) {
+          const p = Math.min(1, (elapsed - h.startT) / Math.max(0.01, target.deadline - h.startT));
+          const e = minJerk(p);
+          const arc = Math.sin(Math.PI * p);
+          h.x = h.from.x + (target.x - h.from.x) * e;
+          h.y = h.from.y + (target.y - 2 - h.from.y) * e - arc * 34;
+          h.z = h.from.z + (PLATE_Z - h.from.z) * e + arc * 25;
+          h.p = p;
+          h.reach = e;
+          // 伸ばしながら指を開き、着く直前ににぎる
+          h.grip = p < 0.75 ? 0.35 * (1 - p / 0.75) : (p - 0.75) / 0.25 * 0.95;
+        } else {
+          const k = Math.min(1, dt * 4.5);
+          const br = Math.sin(elapsed * 2.2 + h.i) * 1.5;
+          h.x += (h.idle.x - h.x) * k;
+          h.y += (h.idle.y + br - h.y) * k;
+          h.z += (h.idle.z - h.z) * k;
+          h.reach += (0 - h.reach) * k;
+          h.grip += (0.4 - h.grip) * k;
+          h.p = 0;
+        }
       }
     }
   } else if (state === 'over' && caughtSlot) {
-    // つかんで持ち上げる
-    tongs.lift = Math.min(1, tongs.lift + dt * 1.5);
-    tongs.x = caughtSlot.x + (180 - caughtSlot.x) * tongs.lift * 0.6;
-    tongs.y = caughtSlot.y - 12 - 130 * tongs.lift;
+    // つかんで顔の前まで持ち上げる
+    for (const h of hands) {
+      if ((caughtSlot.x < 180) === (h.i === 0)) {
+        h.lift = Math.min(1, h.lift + dt * 1.4);
+        const e = 1 - Math.pow(1 - h.lift, 3);
+        h.x = caughtSlot.x + ((h.i ? 215 : 145) - caughtSlot.x) * e;
+        h.y = caughtSlot.y - 2 + (250 - caughtSlot.y) * e;
+        h.z = PLATE_Z + 50 * e;
+        h.grip = 0.95; h.reach = 1 - e * 0.5;
+      } else {
+        const k = Math.min(1, dt * 4);
+        h.x += (h.idle.x - h.x) * k; h.y += (h.idle.y - h.y) * k; h.z += (h.idle.z - h.z) * k;
+        h.reach += (0 - h.reach) * k;
+      }
+    }
+  }
+  // 2D表示用に、一番あぶない手をトング情報へ
+  if (hands) {
+    let u = null;
+    for (const h of hands) if (h.target && (!u || h.p > u.p)) u = h;
+    tongs.target = u ? u.target : null;
+    tongs.startT = u ? u.startT : 0;
+    const hh = state === 'over' && caughtSlot ? hands[caughtSlot.x < 180 ? 0 : 1] : (u || hands[1]);
+    tongs.x = hh.x; tongs.y = hh.y;
   }
 
   for (const f of flyers) {
@@ -889,7 +965,19 @@ function drawOjisan() {
     ctx.beginPath(); ctx.moveTo(cx - 8, cy + 36); ctx.quadraticCurveTo(cx, cy + 40, cx + 8, cy + 36); ctx.stroke();
   }
   ctx.lineCap = 'butt';
-  // せりふ
+  drawOjisanBubble();
+}
+
+function dangerLevel() {
+  let d = 0;
+  if (hands) for (const h of hands) if (h.target) d = Math.max(d, h.p);
+  return d;
+}
+
+function drawOjisanBubble() {
+  const cx = 180;
+  const danger = dangerLevel();
+  const happy = state === 'over';
   if (state === 'play' && danger > 0.15) {
     drawBubble(cx - 112, 135, 'よし、\n焼けたな…');
   }
@@ -980,11 +1068,11 @@ function drawPlate() {
   if (!plateTried) {
     plateTried = true;
     try {
-      plateImg = renderPlate({ x: 14, y: 306, w: 332, h: 248, ppu: PX_PER_UNIT, rects: PLATES, slots: MOLDS, bolts: BOLTS, scale: 2 });
+      plateImg = renderPlate({ x: PLATE_X, y: PLATE_Y, w: PLATE_W, h: PLATE_H, ppu: PX_PER_UNIT, rects: PLATES, slots: MOLDS, bolts: BOLTS, scale: 2 });
     } catch (e) { console.warn('鉄板の3D描画に失敗', e); plateImg = null; }
   }
   if (plateImg) {
-    ctx.drawImage(plateImg, 14, 306, 332, 248);
+    ctx.drawImage(plateImg, PLATE_X, PLATE_Y, PLATE_W, PLATE_H);
   } else {
     for (const p of PLATES) {
       ctx.fillStyle = '#4a4440';
@@ -992,7 +1080,7 @@ function drawPlate() {
     }
     for (const sl of MOLDS) {
       ctx.fillStyle = '#1c1a18';
-      ctx.beginPath(); ctx.ellipse(sl.x, sl.y, 48, 22, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(sl.x, sl.y, 36, 17, 0, 0, Math.PI * 2); ctx.fill();
     }
   }
   // 熱のゆらぎ
@@ -1026,15 +1114,13 @@ function drawPlate() {
   rr(48, 586, 20, 24, 4); ctx.fill();
   ctx.fillStyle = '#555';
   rr(51, 589, 14, 10, 2); ctx.fill();
-  // 受け側の赤い取っ手
-  drawHandle(332, 536, 1);
 }
 
 // 赤い取っ手（dir: -1 左向き / 1 右向き）
-function drawHandle(x, y, dir) {
+function drawHandle(x, y, dir, sc = 1) {
   ctx.save();
   ctx.translate(x, y);
-  ctx.scale(dir, 1);
+  ctx.scale(dir * sc, sc);
   ctx.fillStyle = '#8a6a2a';
   ctx.fillRect(0, -3, 6, 6);
   ctx.fillStyle = '#b9bcc0';
@@ -1053,12 +1139,14 @@ function drawBatter(x, y, face, amount) {
   drawTaiyaki(x, y, sc, 0, 0, face, 0);
   ctx.globalAlpha = 0.35 * Math.min(1, amount);
   ctx.fillStyle = '#fff3a8';
-  ctx.beginPath(); ctx.ellipse(x - 4 * face, y - 4, 28 * sc, 10 * sc, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x - 4 * K * face, y - 4 * K, 28 * sc * K, 10 * sc * K, 0, 0, Math.PI * 2); ctx.fill();
   ctx.globalAlpha = 1;
 }
 
 // あんこ（つぶあんのかたまり）
 function drawAnko(x, y, drop) {
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(K, K); ctx.translate(-x, -y);
   const yy = y - 26 * (1 - drop);
   ctx.globalAlpha = Math.min(1, drop * 2);
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
@@ -1074,6 +1162,7 @@ function drawAnko(x, y, drop) {
     ctx.beginPath(); ctx.ellipse(px, py, 2.4, 1.8, 0, 0, Math.PI * 2); ctx.fill();
   }
   ctx.globalAlpha = 1;
+  ctx.restore();
 }
 
 // ふた（左の型）の角度 0=開いている π=閉じている
@@ -1095,7 +1184,7 @@ function drawLidBack(l) {
   rr(l.x + 0.5, l.y + 0.5, l.w - 1, l.h - 1, 6); ctx.stroke();
   // 魚の形のふくらみ
   ctx.fillStyle = 'rgba(255,255,255,0.05)';
-  ctx.beginPath(); ctx.ellipse(l.x + l.w / 2, l.y + l.h / 2, 44, 17, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(l.x + l.w / 2, l.y + l.h / 2, l.w * 0.34, l.h * 0.3, 0, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = 'rgba(0,0,0,0.5)';
   ctx.lineWidth = 3;
   for (const rx of [0.22, 0.78]) {
@@ -1104,58 +1193,60 @@ function drawLidBack(l) {
 }
 
 function drawRow(s) {
-  const l = LIDS[s.i];
+  const l = s.lid;
   const a = lidAngle(s);
-  // --- 受け側（右）の中身 ---
+  const H = s.hinge, f = s.face;
+  // --- 受け側の中身 ---
   const ph = s.phase;
-  if (ph === 'pour') drawBatter(s.x, s.y, 1, s.t / PH.pour);
-  if (ph === 'pour2' || ph === 'anko' || ph === 'closing') drawBatter(s.x, s.y, 1, 1);
+  if (ph === 'pour') drawBatter(s.x, s.y, f, s.t / PH.pour);
+  if (ph === 'pour2' || ph === 'anko' || ph === 'closing') drawBatter(s.x, s.y, f, 1);
   if (ph === 'anko' || ph === 'closing') drawAnko(s.x, s.y, ph === 'anko' ? Math.min(1, s.t / (PH.anko * 0.6)) : 1);
-  if (ph === 'opening') drawTaiyaki(s.x, s.y, 1, 1, 0, 1, 0);
+  if (ph === 'opening') drawTaiyaki(s.x, s.y, 1, 1, 0, f, 0);
+  drawHandleOf(s, s.base);
   if (a === 0) {
     // ふたは開いたまま：ふた側の生地と取っ手
-    if (ph === 'pour2') drawBatter(s.lx, s.y, -1, s.t / PH.pour2);
-    if (ph === 'anko') drawBatter(s.lx, s.y, -1, 1);
-    drawHandle(l.x, s.y, -1);
+    if (ph === 'pour2') drawBatter(s.lx, s.y, -f, s.t / PH.pour2);
+    if (ph === 'anko') drawBatter(s.lx, s.y, -f, 1);
+    drawHandleOf(s, 1 - s.base);
     return;
   }
   // --- ふたが持ち上がっている：下の本体が見える ---
   ctx.fillStyle = '#4b4e52';
-  rr(l.x, l.y, l.w, l.h, 6); ctx.fill();
+  rr(l.x, l.y, l.w, l.h, 5); ctx.fill();
   ctx.strokeStyle = 'rgba(255,110,40,0.35)';
   ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(l.x + 12, s.y); ctx.lineTo(l.x + l.w - 12, s.y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(l.x + 8, s.y); ctx.lineTo(l.x + l.w - 8, s.y); ctx.stroke();
   // --- ふた（ちょうつがいを軸にパタンと回る） ---
-  const c = Math.cos(a), lift = Math.sin(a) * 10;
+  const c = Math.cos(a), lift = Math.sin(a) * 8;
   ctx.save();
-  ctx.translate(HINGE, -lift);
+  ctx.translate(H, -lift);
   ctx.scale(c, 1);
-  ctx.translate(-HINGE, 0);
+  ctx.translate(-H, 0);
   if (c > 0) {
     // 型の面が見えている
     if (plateImg) {
       const m = 2;
-      ctx.drawImage(plateImg, (l.x - m - 14) * 2, (l.y - m - 306) * 2, (l.w + m * 2) * 2, (l.h + m * 2) * 2,
+      ctx.drawImage(plateImg, (l.x - m - PLATE_X) * 2, (l.y - m - PLATE_Y) * 2, (l.w + m * 2) * 2, (l.h + m * 2) * 2,
         l.x - m, l.y - m, l.w + m * 2, l.h + m * 2);
     } else {
-      ctx.fillStyle = '#222'; rr(l.x, l.y, l.w, l.h, 6); ctx.fill();
+      ctx.fillStyle = '#222'; rr(l.x, l.y, l.w, l.h, 5); ctx.fill();
     }
-    if (ph === 'closing') drawBatter(s.lx, s.y, -1, 1);
+    if (ph === 'closing') drawBatter(s.lx, s.y, -f, 1);
     ctx.fillStyle = `rgba(0,0,0,${0.5 * (1 - c)})`;
-    rr(l.x, l.y, l.w, l.h, 6); ctx.fill();
+    rr(l.x, l.y, l.w, l.h, 5); ctx.fill();
   } else {
     drawLidBack(l);
     ctx.fillStyle = `rgba(255,255,255,${0.12 * (1 + c)})`;
-    rr(l.x, l.y, l.w, l.h, 6); ctx.fill();
+    rr(l.x, l.y, l.w, l.h, 5); ctx.fill();
   }
-  drawHandle(l.x, s.y, -1);
+  drawHandleOf(s, 1 - s.base);
   ctx.restore();
   // 焼け具合バー（閉じたふたの上）
   if (ph === 'cooking') {
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    rr(s.x - 30, s.y + 14, 60, 6, 3); ctx.fill();
+    rr(s.x - 24, s.y + 13, 48, 5, 2.5); ctx.fill();
     ctx.fillStyle = '#f0a030';
-    rr(s.x - 30, s.y + 14, 60 * Math.min(1, s.cook), 6, 3); ctx.fill();
+    rr(s.x - 24, s.y + 13, 48 * Math.min(1, s.cook), 5, 2.5); ctx.fill();
   }
 }
 
@@ -1167,20 +1258,20 @@ function drawSlots() {
       const p = (elapsed - s.doneAt) / (s.deadline - s.doneAt);
       ox += Math.sin(elapsed * 40) * (1 + p * 3);
       oy += Math.sin(elapsed * 23) * p * 2;
+      drawTaiyaki(s.x + ox, s.y + oy, 1, 1, 0, s.face, 0);
       // 光る輪（残り時間）
       ctx.strokeStyle = p > 0.66 ? '#ff4040' : '#ffd23f';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 3.5;
       ctx.beginPath();
-      ctx.ellipse(s.x, s.y, 56, 28, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - p));
+      ctx.ellipse(s.x, s.y, 42, 25, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - p));
       ctx.stroke();
       ctx.fillStyle = '#fff6b0';
-      ctx.font = 'bold 18px sans-serif';
+      ctx.font = 'bold 16px sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('！', s.x + 52, s.y - 18 + Math.sin(elapsed * 10) * 3);
-      drawTaiyaki(s.x + ox, s.y + oy, 1, 1, 0, 1, 0);
-      drawHandle(LIDS[s.i].x, s.y, -1);
+      ctx.fillText('！', s.x + 30, s.y - 20 + Math.sin(elapsed * 10) * 3);
+      drawHandleOf(s, s.outer);
     } else if (s.phase === 'empty' || s.phase === 'taken') {
-      drawHandle(LIDS[s.i].x, s.y, -1);
+      drawHandleOf(s, s.outer);
     } else {
       ctx.save();
       ctx.translate(ox, 0);
@@ -1390,15 +1481,32 @@ function drawOver() {
 
 function draw() {
   drawBackground();
-  drawOjisan();
+  if (oj) {
+    const danger = dangerLevel();
+    let look = null;
+    if (state === 'over' && caughtSlot) look = { x: tongs.x, y: tongs.y };
+    else if (tongs.target) look = { x: tongs.target.x, y: tongs.target.y };
+    oj.update(1 / 60, {
+      t: performance.now() / 1000,
+      tips: hands.map(h => ({ x: h.x, y: h.y, z: h.z, grip: h.grip, reach: h.reach })),
+      look,
+      mood: state === 'over' ? 'happy' : danger > 0.3 ? 'focus' : 'normal',
+    });
+    ctx.drawImage(oj.renderBody(), 0, oj.top, W, oj.height);
+  } else {
+    drawOjisan();
+  }
   drawPlate();
   drawSlots();
   drawParticles();
   // 取られたたい焼き
   if (state === 'over' && caughtSlot) {
-    drawTaiyaki(tongs.x - 4, tongs.y + 6, 1, 1, 0.2, 1, performance.now() / 40);
+    drawTaiyaki(tongs.x, tongs.y + 4, 1, 1, Math.sin(performance.now() / 300) * 0.08, caughtSlot.face || 1, 0);
   }
-  if (state !== 'title') drawTongs();
+  if (oj) {
+    ctx.drawImage(oj.renderArms(), 0, oj.top, W, oj.height);
+    drawOjisanBubble();
+  } else if (state !== 'title') drawTongs();
   for (const f of flyers) drawTaiyaki(f.x, f.y, 1, 1, f.rot, f.dir, f.t * 25);
   drawTexts();
   drawHud();
