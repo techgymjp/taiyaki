@@ -78,8 +78,19 @@ export function createOjisan(opts) {
   renderer.toneMappingExposure = 1.1;
 
   const scene = new THREE.Scene();
-  const cam = new THREE.OrthographicCamera(0, W, -top, -bottom, 1, 3000);
-  cam.position.set(0, 0, 1500);
+  // 遠近のあるカメラ。z=0 の面がゲーム座標とぴったり重なるように置く
+  const DIST = 900;
+  const cam = new THREE.PerspectiveCamera(2 * Math.atan(H / 2 / DIST) * 180 / Math.PI, W / H, 10, 4000);
+  cam.position.set(W / 2, -(top + H / 2), DIST);
+  cam.lookAt(W / 2, -(top + H / 2), 0);
+  cam.updateMatrixWorld();
+  // 画面上の点(gx,gy)の、奥行きzにある3D座標
+  const screenToWorld = (gx, gy, z) => {
+    const nx = gx / W * 2 - 1, ny = -((gy - top) / H * 2 - 1);
+    const d = V(nx, ny, 0.5).unproject(cam).sub(cam.position).normalize();
+    const t = (z - cam.position.z) / d.z;
+    return cam.position.clone().addScaledVector(d, t);
+  };
   const hemi = new THREE.HemisphereLight(0xfff6ea, 0x6a4a30, 1.2);
   scene.add(hemi);
   const key = new THREE.DirectionalLight(0xffffff, 2.2);
@@ -193,14 +204,27 @@ export function createOjisan(opts) {
   headPivot.add(head);
   body.add(headPivot);
 
-  body.position.set(180, -160, 0);
-  scene.add(body);
+  // 腰を軸に前かがみ・横に傾く
+  const hips = new THREE.Group();
+  hips.position.set(180, -470, -40);
+  body.position.set(0, 310, 40);
+  hips.add(body);
+  scene.add(hips);
   setLayer(body, BODY);
+  const shoulderAnchors = [-1, 1].map(sx => {
+    const o = new THREE.Object3D();
+    o.position.set(sx * 64, -72, -20);
+    body.add(o);
+    return o;
+  });
 
   // ---- 腕と軍手 ----
   const L1 = 138, L2 = 132, HAND = 34;
   function makeArm(side) {
     const g = new THREE.Group();
+    const clip = new THREE.Plane(V(0, 0, 1), -95);
+    const cl = m => { const c = m.clone(); c.clippingPlanes = [clip]; return c; };
+    const cloth = cl(clothBase), skin = cl(skinBase), glove = cl(gloveBase), yellow = cl(yellowBase), stain = cl(stainBase);
     const upper = limb(19, cloth);
     const fore = limb(11.5, skin);
     const sleeveEnd = new THREE.Mesh(new THREE.SphereGeometry(19, 20, 14), cloth);
@@ -250,10 +274,11 @@ export function createOjisan(opts) {
     g.add(hand);
     scene.add(g);
     setLayer(g, ARMS);
-    return { g, upper, fore, sleeveEnd, elbowJ, hand, fingers, thumb, side };
+    return { g, upper, fore, sleeveEnd, elbowJ, hand, fingers, thumb, side, clip, thr: 95 };
   }
+  const clothBase = cloth, skinBase = skin, gloveBase = glove, yellowBase = yellow, stainBase = stain;
   const arms = [makeArm(-1), makeArm(1)];
-  const shoulders = [V(180 - 64, -232, -20), V(180 + 64, -232, -20)];
+  renderer.localClippingEnabled = true;
 
   const tmpM = new THREE.Matrix4();
   function poseArm(arm, S, tip, grip, reach) {
@@ -262,7 +287,7 @@ export function createOjisan(opts) {
     const downish = V(0, -0.55, 0.85).normalize();
     const fdir = toTip.clone().lerp(downish, 0.35 + 0.25 * reach).normalize();
     const wristT = tip.clone().addScaledVector(fdir, -(HAND + 18));
-    const pole = S.clone().add(V(arm.side * 45, -70, -170)); // ひじは後ろ下へ
+    const pole = S.clone().add(V(arm.side * (55 + 40 * reach), -200 + 120 * reach, -40)); // ひじは下（伸ばすほど外へ）
     const { elbow, wrist } = solveIK(S, wristT, L1, L2, pole);
     const mid = elbow.clone().lerp(wrist, 0.18);
     arm.upper.userData.place(S, mid);
@@ -292,11 +317,20 @@ export function createOjisan(opts) {
     const t = s.t;
     // 呼吸
     const breath = Math.sin(t * 2.2) * 1.5;
-    body.position.y = -160 + breath * 0.5;
+    body.position.y = 310 + breath * 0.5;
     torso.scale.y = 120 + breath;
-    // 体の傾き（手を伸ばしている側へ）
-    const lean = (s.tips[1].reach - s.tips[0].reach) * 0.08;
-    body.rotation.z += (-lean - body.rotation.z) * Math.min(1, dt * 6);
+    // 体の傾き：手を伸ばすほど前かがみ、伸ばしている側へ少し傾く
+    let fwd = 0, side = 0;
+    s.tips.forEach((tp, i) => {
+      const deep = Math.max(0, Math.min(1, (tp.y - 300) / 230));
+      fwd = Math.max(fwd, tp.reach * (0.1 + 0.16 * deep));
+      side += tp.reach * (i ? 1 : -1) * (0.04 + 0.05 * Math.abs(tp.x - 180) / 140);
+    });
+    if (s.mood === 'happy') fwd = -0.04;
+    const k = Math.min(1, dt * 5);
+    hips.rotation.x += (fwd - hips.rotation.x) * k;
+    hips.rotation.z += (-side - hips.rotation.z) * k;
+    hips.updateMatrixWorld(true);
     // 頭の向き
     let ry = 0, rx = 0.06;
     if (s.look) {
@@ -328,20 +362,31 @@ export function createOjisan(opts) {
     mouthH.visible = s.mood === 'happy';
     // 腕
     s.tips.forEach((tp, i) => {
-      poseArm(arms[i], shoulders[i], V(tp.x, -tp.y, tp.z), tp.grip, tp.reach);
+      // 手を伸ばしはじめたら腕は機械の上を越えるので、全部手前に描く
+      const r = Math.min(1, Math.max(0, tp.reach / 0.3));
+      arms[i].thr = 95 - 400 * r * r * (3 - 2 * r);
+      const S = shoulderAnchors[i].getWorldPosition(V(0, 0, 0));
+      poseArm(arms[i], S, screenToWorld(tp.x, tp.y, tp.z), tp.grip, tp.reach);
     });
   }
 
-  function render(layer) {
-    cam.layers.set(layer);
+  // 機械の奥のふち（これより奥は鉄板の後ろに隠れる）
+  function render(layers, front) {
+    cam.layers.disableAll();
+    for (const l of layers) cam.layers.enable(l);
+    // 奥側の描画では z<thr だけ、手前側の描画では z>=thr だけを残す
+    for (const a of arms) {
+      if (front) a.clip.set(V(0, 0, 1), -a.thr);
+      else a.clip.set(V(0, 0, -1), a.thr);
+    }
     renderer.render(scene, cam);
     return canvas;
   }
 
   return {
     update,
-    renderBody: () => render(BODY),
-    renderArms: () => render(ARMS),
+    renderBody: () => render([BODY, ARMS], false),
+    renderArms: () => render([ARMS], true),
     top, height: H,
   };
 }
