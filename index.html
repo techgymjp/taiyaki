@@ -2,7 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#3b2414">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>とべ！たいやきちゃん</title>
 <style>
@@ -16,24 +17,92 @@
   }
   body { display: flex; align-items: center; justify-content: center; }
   canvas { display: block; }
-  #lang {
-    position: fixed; right: 62px; bottom: 10px;
-    width: 44px; height: 44px; border-radius: 22px;
-    border: 2px solid #fff3; background: #0006; color: #fff;
-    font: bold 14px sans-serif; cursor: pointer;
+  /* キャンバスの上に重ねるボタン類（座標はキャンバスと同じ 360×640） */
+  #ui {
+    position: fixed; left: 0; top: 0; width: 360px; height: 640px;
+    transform-origin: 0 0; pointer-events: none;
+    font-family: sans-serif;
   }
-  #mute {
-    position: fixed; right: 10px; bottom: 10px;
-    width: 44px; height: 44px; border-radius: 22px;
-    border: 2px solid #fff3; background: #0006; color: #fff;
-    font-size: 20px; cursor: pointer;
+  #ui > * { position: absolute; pointer-events: auto; }
+  #ui [hidden] { display: none !important; }
+  .round {
+    width: 40px; height: 40px; border-radius: 20px;
+    border: 2px solid #fff4; background: #0007; color: #fff;
+    font: bold 14px sans-serif; cursor: pointer; padding: 0;
   }
+  #mute { right: 8px; top: 8px; font-size: 18px; }
+  #lang { right: 54px; top: 8px; }
+  #pauseBtn { left: 8px; top: 8px; font-size: 15px; letter-spacing: -1px; }
+  .btn {
+    display: block; border: none; border-radius: 26px; cursor: pointer;
+    font: 900 19px sans-serif; color: #fff; padding: 12px 0;
+    background: linear-gradient(#ff8a3d, #e0481c); box-shadow: 0 4px 0 #8a2a0c, 0 6px 14px #0006;
+  }
+  .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #8a2a0c; }
+  .btn.sub { background: linear-gradient(#fff6e4, #e9d2a6); color: #5a3214; box-shadow: 0 4px 0 #8a6a3a, 0 6px 14px #0006; }
+  .btn.green { background: linear-gradient(#5fd17a, #23944a); box-shadow: 0 4px 0 #145a2c, 0 6px 14px #0006; }
+  .btn small { display: block; font: bold 11px sans-serif; opacity: 0.85; margin-top: 2px; }
+  .row { display: flex; gap: 12px; }
+  .row .btn { flex: 1; }
+  #titleMenu { left: 70px; top: 360px; width: 220px; display: grid; gap: 14px; }
+  #howtoMenu { left: 30px; top: 470px; width: 300px; }
+  #pauseMenu { left: 70px; top: 300px; width: 220px; display: grid; gap: 14px; }
+  #overMenu { left: 30px; top: 400px; width: 300px; display: grid; gap: 12px; }
+  #rescue {
+    left: 20px; top: 390px; width: 288px; padding: 12px 16px;
+    background: #fffaf0f2; border-radius: 16px; box-shadow: 0 8px 24px #0008;
+    color: #5a3214; font: bold 13px sans-serif; text-align: center;
+  }
+  #rescue p { margin: 0 0 10px; }
+  #rescue .btn { font-size: 15px; padding: 10px 0; }
+  #legal {
+    left: 0; top: 488px; width: 360px; text-align: center;
+    font: 11px sans-serif; color: #fff;
+  }
+  #legal a { color: #ffe9a8; margin: 0 4px; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<button id="mute" aria-label="Sound on/off">♪</button>
-<button id="lang" aria-label="Language">EN</button>
+<div id="ui">
+  <button id="pauseBtn" class="round" type="button" aria-label="Pause" hidden>❚❚</button>
+  <button id="lang" class="round" type="button" aria-label="Language">EN</button>
+  <button id="mute" class="round" type="button" aria-label="Sound on/off">♪</button>
+  <div id="titleMenu" hidden>
+    <button id="playBtn" class="btn" type="button" data-t="play">▶ プレイ</button>
+    <button id="howtoBtn" class="btn sub" type="button" data-t="howtoBtn">あそびかた</button>
+  </div>
+  <div id="legal" hidden>
+    <span id="buildInfo"></span>
+    <a id="privacyLink" href="https://techgym.jp/privacy-policy/" target="_blank" rel="noopener" data-t="privacy">プライバシーポリシー</a>
+    <span id="adPrivacy" hidden>|<a href="#" id="adPrivacyLink" data-t="adSettings">広告の設定</a></span>
+  </div>
+  <div id="howtoMenu" class="row" hidden>
+    <button id="howtoBack" class="btn sub" type="button" data-t="toTitle">タイトルへ</button>
+    <button id="howtoPlay" class="btn" type="button" data-t="play">▶ プレイ</button>
+  </div>
+  <div id="pauseMenu" hidden>
+    <button id="pauseResume" class="btn" type="button" data-t="resume">再開</button>
+    <button id="pauseTitle" class="btn sub" type="button" data-t="toTitle">タイトルへ</button>
+  </div>
+  <div id="rescue" hidden>
+    <p id="rescueNote"></p>
+    <div class="row">
+      <button id="rescueWatch" class="btn green" type="button"></button>
+      <button id="rescueNext" class="btn sub" type="button" style="flex:0 0 92px"></button>
+    </div>
+  </div>
+  <div id="overMenu" hidden>
+    <button id="shareBtn" class="btn green" type="button" data-t="share">📤 結果をシェア</button>
+    <div class="row">
+      <button id="retryBtn" class="btn" type="button" data-t="retryBtn">もう一度</button>
+      <button id="titleBtn" class="btn sub" type="button" data-t="toTitle">タイトルへ</button>
+    </div>
+  </div>
+</div>
+<script src="ads-config.js"></script>
+<script src="build-info.js"></script>
+<script src="ads.js"></script>
 <script type="module">
 import { createTaiyakiSprites, renderPlate } from './taiyaki3d.js';
 import { createOjisan } from './ojisan3d.js';
@@ -53,6 +122,8 @@ function resize() {
   canvas.width = Math.round(W * scale * dpr);
   canvas.height = Math.round(H * scale * dpr);
   ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+  const left = (window.innerWidth - W * scale) / 2, top = (window.innerHeight - H * scale) / 2;
+  document.getElementById('ui').style.transform = `translate(${left}px, ${top}px) scale(${scale})`;
 }
 window.addEventListener('resize', resize);
 resize();
@@ -75,31 +146,77 @@ const I18N = {
     docTitle: 'とべ！たいやきちゃん',
     title1: 'とべ！', title2: 'たいやきちゃん',
     howto: ['たい焼きが焼けたら、', 'おじさんに取られる前に タップ！', 'たい焼きちゃんを 昇天させてあげよう。', '', '１匹でも取られたら ゲームオーバー'],
-    tapStart: 'タップしてスタート',
     saved: n => `にがした数 ${n}`, best: n => `ベスト ${n}`,
     gameOver: 'ゲームオーバー', caught: 'おじさんに 取られちゃった…',
     savedTotal: n => `にがした数　${n} 匹`, newBest: 'ベスト記録！', bestTotal: n => `ベスト ${n} 匹`,
-    retry: 'タップでもう一回',
     notYet: 'まだ！', closeCall: 'ギリギリ昇天!',
     escapes: ['しょうてん〜', 'さようなら〜', '天国へ〜', 'お達者で〜', 'ありがとう〜'],
     ojReady: 'よし、\n焼けたな…', ojDone: 'へい、\nいっちょあがり！',
     bonks: ['うわっ！', 'なんだぁ!?', 'ぶほっ', 'まぶしっ！', 'じゃまだよ！', 'おわっ！？'],
     langBtn: 'EN',
+    tagline: 'おじさんに取られる前に、気球で昇天させよう',
+    play: '▶ プレイ', howtoBtn: 'あそびかた', toTitle: 'タイトルへ', resume: '再開', paused: 'ポーズ',
+    retryBtn: 'もう一度', share: '📤 結果をシェア',
+    howtoTitle: 'あそびかた',
+    howtoLines: [
+      'おじさんが、たい焼きを焼いています。',
+      '生地を流して、あんこをのせて、',
+      '型を閉じて…焼けたら型が開きます。',
+      '',
+      '焼きあがったたい焼きを、',
+      'おじさんの手が届く前にタップ！',
+      'たい焼きちゃんは気球で昇天します。',
+      '',
+      'まだ焼けていないうちは、タップしても',
+      '逃がせません。',
+      '１匹でも取られたら ゲームオーバー。',
+    ],
+    rescueWatch: '▶ 広告を見て取り返す', rescueNext: s => `つぎへ ${s}`,
+    rescueNote: (n, max) => `取られたたい焼きを取り返せます（のこり ${n} / ${max} 回）`,
+    rescueLoading: '広告を読み込み中…', rescueFail: '広告を読み込めませんでした',
+    rescued: '取り返した！', rescuesLine: n => `取り返し ${n} 回`,
+    privacy: 'プライバシーポリシー', privacyUrl: 'https://techgym.jp/privacy-policy/', adSettings: '広告の設定',
+    shareTitle: 'とべ！たいやきちゃん', shareDialog: '結果をシェア',
+    shareText: (n, r) => `🐟とべ！たいやきちゃんで、たい焼きを ${n} 匹 昇天させました！${r ? `（取り返し ${r} 回）` : ''}\n#とべたいやきちゃん #たい焼き`,
+    copied: 'コピーしました',
   },
   en: {
     docTitle: 'Fly Away, Taiyaki-chan!',
     title1: 'Fly Away!', title2: 'Taiyaki-chan',
     howto: ['When a taiyaki is done,', 'tap it before the old man grabs it', 'and send it up to heaven!', '', 'If he takes even one, game over.'],
-    tapStart: 'Tap to start',
     saved: n => `Saved ${n}`, best: n => `Best ${n}`,
     gameOver: 'GAME OVER', caught: 'The old man got one…',
     savedTotal: n => `Saved: ${n}`, newBest: 'New record!', bestTotal: n => `Best: ${n}`,
-    retry: 'Tap to play again',
     notYet: 'Not yet!', closeCall: 'Just in time!',
     escapes: ['Ascending~', 'Farewell~', 'Off to heaven~', 'Take care~', 'Thank you~'],
     ojReady: 'Alright,\nthis one\'s done…', ojDone: 'There ya go,\none order up!',
     bonks: ['Whoa!', 'What the!?', 'Pfft!', 'Too bright!', 'Outta my way!', 'Huh!?'],
     langBtn: '日本',
+    tagline: 'Send them up to heaven before he grabs them!',
+    play: '▶ Play', howtoBtn: 'How to play', toTitle: 'Title', resume: 'Resume', paused: 'Paused',
+    retryBtn: 'Play again', share: '📤 Share result',
+    howtoTitle: 'How to play',
+    howtoLines: [
+      'The old man is making taiyaki.',
+      'He pours the batter, adds red bean paste,',
+      'closes the mold… and opens it when done.',
+      '',
+      'Tap a finished taiyaki',
+      'before his hand reaches it!',
+      'It rides a balloon up to heaven.',
+      '',
+      'You can\'t save one that',
+      'isn\'t cooked yet.',
+      'If he takes even one, game over.',
+    ],
+    rescueWatch: '▶ Watch an ad to take it back', rescueNext: s => `Next ${s}`,
+    rescueNote: (n, max) => `You can take back the grabbed taiyaki (${n} / ${max} left)`,
+    rescueLoading: 'Loading ad…', rescueFail: 'Could not load an ad',
+    rescued: 'Got it back!', rescuesLine: n => `Taken back ${n}×`,
+    privacy: 'Privacy Policy', privacyUrl: 'https://techgym.jp/privacy-policy-en/', adSettings: 'Ad settings',
+    shareTitle: 'Fly Away, Taiyaki-chan!', shareDialog: 'Share result',
+    shareText: (n, r) => `🐟 I sent ${n} taiyaki up to heaven in "Fly Away, Taiyaki-chan!"${r ? ` (taken back ${r}×)` : ''}\n#taiyaki`,
+    copied: 'Copied',
   },
 };
 let lang = 'ja';
@@ -115,6 +232,9 @@ function applyLang() {
   document.documentElement.lang = lang;
   document.title = T().docTitle;
   langBtn.textContent = T().langBtn;
+  document.querySelectorAll('[data-t]').forEach(el => { el.textContent = T()[el.dataset.t]; });
+  const pl = document.getElementById('privacyLink');
+  if (pl) pl.href = T().privacyUrl;
 }
 applyLang();
 langBtn.addEventListener('pointerdown', e => {
@@ -159,7 +279,10 @@ const Sound = {
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
   },
   resume() {
-    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx && this.ctx.state === 'suspended' && !paused) this.ctx.resume();
+  },
+  suspend() {
+    if (this.ctx && this.ctx.state === 'running') this.ctx.suspend();
   },
   setMuted(m) {
     this.muted = m;
@@ -535,6 +658,7 @@ const Sound = {
   },
 };
 
+window.Sound = Sound; // ads.js が広告の表示中に音を止める
 const muteBtn = document.getElementById('mute');
 muteBtn.addEventListener('pointerdown', e => {
   e.stopPropagation();
@@ -584,7 +708,11 @@ function chooseSide(s) {
 // 1段の流れ
 const PH = { pour: 0.55, anko: 0.5, pour2: 0.45, closing: 0.35, opening: 0.3 };
 
-let state = 'title'; // title | play | over
+let state = 'title'; // title | howto | play | caught（取られた直後） | over
+let paused = false;
+let rescues = 0;      // リワード広告で取り返した回数
+const RESCUE_MAX = 3;
+const isCaught = () => state === 'caught' || state === 'over';
 let slots, flyers, particles, texts, score, best = loadBest(), elapsed, overAt, caughtSlot;
 let tongs, hands;
 let bonk = { t: 0, len: 1, dir: 1, text: '' };
@@ -628,21 +756,34 @@ function grabWindowNow() {
 }
 
 function startGame() {
-  Sound.init(); Sound.resume();
+  Sound.init();
   reset();
   state = 'play';
+  paused = false;
+  rescues = 0;
+  Sound.resume();
   Sound.tempo = 138;
   Sound.startBgm();
 }
 
+// おじさんに取られた：持ち上げるところを見せてから、取り返す（リワード広告）か結果画面へ
+let caughtT = 0;
 function gameOver(slot) {
-  state = 'over';
-  overAt = performance.now();
+  state = 'caught';
+  caughtT = 0;
   caughtSlot = slot;
   slot.phase = 'taken';
-  if (score > best) { best = score; saveBest(best); }
+  for (const h of hands) h.lift = 0;
   Sound.stopBgm();
   Sound.gameOver();
+  if (window.Ads && Ads.canReward && rescues < RESCUE_MAX) rescue.pending = RESCUE_DELAY;
+}
+function finishGame() {
+  if (state !== 'caught') return;
+  closeRescue();
+  state = 'over';
+  overAt = performance.now();
+  if (score > best) { best = score; saveBest(best); }
 }
 
 // ===================== 入力 =====================
@@ -651,11 +792,7 @@ canvas.addEventListener('pointerdown', e => {
   const r = canvas.getBoundingClientRect();
   const x = (e.clientX - r.left) / scale;
   const y = (e.clientY - r.top) / scale;
-  if (state === 'title') { startGame(); return; }
-  if (state === 'over') {
-    if (performance.now() - overAt > 900) startGame();
-    return;
-  }
+  if (state !== 'play' || paused) return;
   // 一番近いたい焼きを探す
   let hit = null, bestD = Infinity;
   for (const s of slots) {
@@ -697,8 +834,178 @@ function escape(s) {
   s.cook = 0;
 }
 
+// ===================== 画面の切り替え・広告・アプリの機能 =====================
+const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const plugin = name => (NATIVE && window.Capacitor.Plugins ? window.Capacitor.Plugins[name] : null);
+const Ads = window.Ads || { available: false, canReward: false, showing: false, privacyOptionsRequired: false, initDone: Promise.resolve(), showInterstitial: async () => {}, showRewarded: async () => 'unavailable', setBanner() {}, showPrivacyOptions: async () => {} };
+const $ = id => document.getElementById(id);
+
+// 全画面広告：「プレイ」（タイトル・あそびかたから）、「タイトルへ」（あそびかた・ポーズ・結果から）、
+// ポーズからの「再開」、結果画面の「もう一度」のたびに毎回出す
+let adBusy = false;
+async function withInterstitial(next) {
+  if (adBusy) return;
+  if (Ads.available) {
+    adBusy = true;
+    await Ads.showInterstitial(3000);
+    adBusy = false;
+  }
+  next();
+}
+function pauseGame() {
+  if (state !== 'play' || paused) return;
+  paused = true;
+  Sound.suspend();
+}
+function play() { Sound.init(); withInterstitial(() => { if (state === 'title' || state === 'howto' || state === 'over') startGame(); }); }
+function goTitle() {
+  withInterstitial(() => {
+    closeRescue();
+    Sound.stopBgm();
+    paused = false;
+    reset();
+    state = 'title';
+    Sound.resume();
+  });
+}
+function resumeFromPause() { withInterstitial(() => { if (paused) { paused = false; Sound.resume(); } }); }
+function openHowto() { if (state === 'title' && !adBusy) state = 'howto'; }
+function backFromHowto() { withInterstitial(() => { if (state === 'howto') state = 'title'; }); }
+
+const click = (id, fn) => $(id).addEventListener('click', e => { e.stopPropagation(); Sound.init(); fn(); });
+click('playBtn', play);
+click('howtoPlay', play);
+click('howtoBtn', openHowto);
+click('howtoBack', backFromHowto);
+click('pauseBtn', pauseGame);
+click('pauseResume', () => { if (paused) resumeFromPause(); });
+click('pauseTitle', () => { if (paused) goTitle(); });
+click('retryBtn', () => { if (state === 'over') play(); });
+click('titleBtn', () => { if (state === 'over') goTitle(); });
+click('shareBtn', shareResult);
+
+// ---------- リワード広告：取られたたい焼きを取り返す（アプリのみ・1 ゲーム 3 回まで） ----------
+// おじさんが持ち上げるところを見届けられるよう、少し待ってから案内を出し、数秒で自動的に結果画面へ進む
+const RESCUE_DELAY = 2.4, RESCUE_WAIT = 6;
+const rescue = { active: false, busy: false, t: 0, pending: 0 };
+function showRescue() {
+  Object.assign(rescue, { active: true, busy: false, t: RESCUE_WAIT, pending: 0 });
+  $('rescueWatch').disabled = false;
+  $('rescueWatch').textContent = T().rescueWatch;
+  $('rescueNote').textContent = T().rescueNote(RESCUE_MAX - rescues, RESCUE_MAX);
+  $('rescue').hidden = false;
+}
+function closeRescue() {
+  rescue.active = false;
+  rescue.pending = 0;
+  $('rescue').hidden = true;
+}
+function updateRescue(dt) {
+  if (rescue.pending > 0) {
+    rescue.pending -= dt;
+    if (rescue.pending <= 0) showRescue();
+    return;
+  }
+  if (!rescue.active || rescue.busy) return;
+  rescue.t -= dt;
+  $('rescueNext').textContent = T().rescueNext(Math.max(0, Math.ceil(rescue.t)));
+  if (rescue.t <= 0) finishGame();
+}
+click('rescueNext', () => { if (rescue.active && !rescue.busy) finishGame(); });
+click('rescueWatch', async () => {
+  if (!rescue.active || rescue.busy) return;
+  rescue.busy = true;
+  $('rescueWatch').disabled = true;
+  $('rescueWatch').textContent = T().rescueLoading;
+  const result = await Ads.showRewarded();
+  if (state !== 'caught') return;
+  if (result === 'unavailable') {
+    $('rescueNote').textContent = T().rescueFail;
+    setTimeout(finishGame, 1500);
+    return;
+  }
+  if (result !== 'rewarded') { finishGame(); return; }
+  takeBack();
+});
+// 取り返す：たい焼きを型に戻して、もう一度自分で逃がす（点数はもらえない）
+function takeBack() {
+  closeRescue();
+  rescues++;
+  const s = caughtSlot;
+  caughtSlot = null;
+  state = 'play';
+  s.phase = 'done';
+  s.doneAt = elapsed;
+  s.deadline = elapsed + Math.max(1.4, grabWindowNow() * 1.5);
+  for (const o of slots) if (o !== s && o.phase === 'done') o.deadline += 1.5;
+  for (const h of hands) { h.lift = 0; h.target = null; h.miss = 0.3; h.grip = 1; }
+  texts.push({ x: s.x, y: s.y - 30, text: T().rescued, t: 0, color: '#7fffd4' });
+  Sound.ascend();
+  Sound.resume();
+  Sound.startBgm();
+}
+
+// ---------- 結果のシェア ----------
+async function shareResult() {
+  const text = T().shareText(score, rescues);
+  const nativeShare = plugin('Share');
+  if (nativeShare) {
+    try { await nativeShare.share({ title: T().shareTitle, text, dialogTitle: T().shareDialog }); } catch (e) { /* キャンセル */ }
+    return;
+  }
+  if (navigator.share) {
+    try { await navigator.share({ title: T().shareTitle, text }); } catch (e) { /* キャンセル */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    texts.push({ x: W / 2, y: 380, text: T().copied, t: 0, color: '#fff' });
+  } catch (e) { /* 何もしない */ }
+}
+
+// ---------- ボタンの表示・バナー ----------
+const uiEls = {};
+for (const id of ['titleMenu', 'legal', 'howtoMenu', 'pauseMenu', 'overMenu', 'pauseBtn', 'lang']) uiEls[id] = $(id);
+function showEl(id, v) { if (uiEls[id].hidden === v) uiEls[id].hidden = !v; }
+function updateUI() {
+  const free = !adBusy;
+  showEl('titleMenu', state === 'title' && free);
+  showEl('legal', state === 'title' && free);
+  showEl('lang', state === 'title' && free);
+  showEl('howtoMenu', state === 'howto' && free);
+  showEl('pauseMenu', state === 'play' && paused && free);
+  showEl('pauseBtn', state === 'play' && !paused);
+  showEl('overMenu', state === 'over' && free);
+  // バナー広告：タイトル・あそびかた・ポーズ・結果画面だけ（プレイ中は出さない）
+  Ads.setBanner(state === 'title' || state === 'howto' || state === 'over' || (state === 'play' && paused));
+}
+
+// タイトル画面の下に、バージョン（アプリ版）・プライバシーポリシー・広告の設定（EU など）を出す
+if (window.APP_VERSION && window.APP_VERSION !== 'dev') $('buildInfo').textContent = window.APP_VERSION + ' |';
+Ads.initDone.then(() => { if (Ads.privacyOptionsRequired) $('adPrivacy').hidden = false; });
+$('adPrivacyLink').addEventListener('click', e => { e.preventDefault(); Ads.showPrivacyOptions(); });
+
+// Android の戻るボタン：プレイ中はポーズ（ポーズ中なら再開）、あそびかたではタイトルへ、タイトル・結果画面ではアプリを閉じる
+if (plugin('App')) {
+  plugin('App').addListener('backButton', () => {
+    if (adBusy) return;
+    if (state === 'howto') backFromHowto();
+    else if (state === 'title' || state === 'over') plugin('App').exitApp();
+    else if (state === 'caught') { if (rescue.active && !rescue.busy) finishGame(); }
+    else if (paused) resumeFromPause();
+    else pauseGame();
+  });
+}
+
 // ===================== 更新 =====================
 function update(dt) {
+  updateUI();
+  if (paused) return;
+  if (state === 'caught') {
+    caughtT += dt;
+    updateRescue(dt);
+    if (!rescue.active && rescue.pending <= 0 && caughtT > 1.8) finishGame();
+  }
   if (state === 'play') {
     elapsed += dt;
     for (const s of slots) {
@@ -792,7 +1099,7 @@ function update(dt) {
         }
       }
     }
-  } else if (state === 'over' && caughtSlot) {
+  } else if (isCaught() && caughtSlot) {
     // つかんで顔の前まで持ち上げる
     for (const h of hands) {
       if ((caughtSlot.x < 180) === (h.i === 0)) {
@@ -815,7 +1122,7 @@ function update(dt) {
     for (const h of hands) if (h.target && (!u || h.target.deadline < u.target.deadline)) u = h;
     tongs.target = u ? u.target : null;
     tongs.startT = u ? u.startT : 0;
-    const hh = state === 'over' && caughtSlot ? hands[caughtSlot.x < 180 ? 0 : 1] : (u || hands[1]);
+    const hh = isCaught() && caughtSlot ? hands[caughtSlot.x < 180 ? 0 : 1] : (u || hands[1]);
     tongs.x = hh.x; tongs.y = hh.y;
   }
 
@@ -997,7 +1304,7 @@ function drawBackground() {
 function drawOjisan() {
   const cx = 180, cy = 160;
   const danger = tongs.target ? Math.min(1, (elapsed - tongs.startT) / Math.max(0.01, tongs.target.deadline - tongs.startT)) : 0;
-  const happy = state === 'over';
+  const happy = isCaught();
   // 体（白い作務衣）
   ctx.fillStyle = '#f4f1ea';
   ctx.strokeStyle = '#8a7a66';
@@ -1119,7 +1426,7 @@ function dangerLevel() {
 function drawOjisanBubble() {
   const cx = 180;
   const danger = dangerLevel();
-  const happy = state === 'over';
+  const happy = isCaught();
   if (state === 'play' && bonk.t > 0.15) {
     drawBubble(cx - 112, 135, bonk.text);
     return;
@@ -1696,34 +2003,51 @@ function drawTitle() {
   ctx.fillStyle = 'rgba(30,15,5,0.6)';
   ctx.fillRect(0, 0, W, H);
   const t = performance.now() / 1000;
-  outlinedText(T().title1, W / 2, 150, 44, '#ffe066', '#7a3a10');
-  outlinedText(T().title2, W / 2, 205, 40, '#fff', '#7a3a10');
-  drawTaiyaki(W / 2, 290 + Math.sin(t * 3) * 10, 1.4, 1, Math.sin(t * 6) * 0.15, 1, t * 15);
+  outlinedText(T().title1, W / 2, 118, 44, '#ffe066', '#7a3a10');
+  outlinedText(T().title2, W / 2, 170, lang === 'ja' ? 40 : 36, '#fff', '#7a3a10');
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(T().tagline, W / 2, 210);
+  drawTaiyaki(W / 2, 268 + Math.sin(t * 3) * 8, 1.6, 1, Math.sin(t * 2) * 0.1, 1, 0);
+  outlinedText(T().bestTotal(best), W / 2, 330, 18, '#ffe066', '#3b2414');
+}
+
+function drawHowto() {
+  ctx.fillStyle = 'rgba(30,15,5,0.82)';
+  ctx.fillRect(0, 0, W, H);
+  outlinedText(T().howtoTitle, W / 2, 80, 30, '#ffe066', '#7a3a10');
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 15px sans-serif';
-  ctx.textAlign = 'center';
-  const lines = T().howto;
-  lines.forEach((l, i) => ctx.fillText(l, W / 2, 380 + i * 24));
-  if (Math.floor(t * 2) % 2 === 0) outlinedText(T().tapStart, W / 2, 540, 24, '#fff', '#c33');
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  T().howtoLines.forEach((l, i) => ctx.fillText(l, W / 2, 135 + i * 28));
+}
+
+function drawPause() {
+  ctx.fillStyle = 'rgba(30,15,5,0.6)';
+  ctx.fillRect(0, 0, W, H);
+  outlinedText(T().paused, W / 2, 240, 36, '#fff', '#7a3a10');
 }
 
 function drawOver() {
-  ctx.fillStyle = 'rgba(30,15,5,0.55)';
+  ctx.fillStyle = 'rgba(30,15,5,0.6)';
   ctx.fillRect(0, 0, W, H);
-  outlinedText(T().gameOver, W / 2, 330, 36, '#fff', '#a01010');
+  outlinedText(T().gameOver, W / 2, 190, lang === 'ja' ? 36 : 40, '#fff', '#a01010');
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 16px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(T().caught, W / 2, 375);
-  outlinedText(T().savedTotal(score), W / 2, 425, 28, '#ffe066', '#7a3a10');
-  if (score >= best && score > 0) outlinedText(T().newBest, W / 2, 465, 20, '#7fffd4', '#0a4a3a');
+  ctx.fillText(T().caught, W / 2, 236);
+  outlinedText(T().savedTotal(score), W / 2, 288, 30, '#ffe066', '#7a3a10');
+  if (rescues > 0) {
+    ctx.fillStyle = '#ffe9a8';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(T().rescuesLine(rescues), W / 2, 324);
+  }
+  if (score >= best && score > 0) outlinedText(T().newBest, W / 2, 360, 20, '#7fffd4', '#0a4a3a');
   else {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 15px sans-serif';
-    ctx.fillText(T().bestTotal(best), W / 2, 465);
-  }
-  if (performance.now() - overAt > 900 && Math.floor(performance.now() / 500) % 2 === 0) {
-    outlinedText(T().retry, W / 2, 530, 22, '#fff', '#c33');
+    ctx.fillText(T().bestTotal(best), W / 2, 360);
   }
 }
 
@@ -1732,13 +2056,13 @@ function draw() {
   if (oj) {
     const danger = dangerLevel();
     let look = null;
-    if (state === 'over' && caughtSlot) look = { x: tongs.x, y: tongs.y };
+    if (isCaught() && caughtSlot) look = { x: tongs.x, y: tongs.y };
     else if (tongs.target) look = { x: tongs.target.x, y: tongs.target.y };
     oj.update(1 / 60, {
       t: performance.now() / 1000,
       tips: hands.map(h => ({ x: h.x, y: h.y, z: h.z, grip: h.grip, reach: h.reach })),
       look,
-      mood: state === 'over' ? 'happy' : bonk.t > 0.15 ? 'bonk' : danger > 0.3 ? 'focus' : 'normal',
+      mood: isCaught() ? 'happy' : bonk.t > 0.15 ? 'bonk' : danger > 0.3 ? 'focus' : 'normal',
       bonk,
     });
     ctx.drawImage(oj.renderBody(), 0, oj.top, W, oj.height);
@@ -1749,7 +2073,7 @@ function draw() {
   drawSlots();
   drawParticles();
   // 取られたたい焼き
-  if (state === 'over' && caughtSlot) {
+  if (isCaught() && caughtSlot) {
     drawTaiyaki(tongs.x, tongs.y + 4, 1, 1, Math.sin(performance.now() / 300) * 0.08, caughtSlot.face || 1, 0);
   }
   if (oj) {
@@ -1759,9 +2083,11 @@ function draw() {
   drawHeavenLight();
   for (const f of flyers) drawBalloon(f);
   drawTexts();
-  drawHud();
+  if (state === 'play' || state === 'caught') drawHud();
   if (state === 'title') drawTitle();
+  if (state === 'howto') drawHowto();
   if (state === 'over') drawOver();
+  if (paused && state === 'play') drawPause();
 }
 
 // ===================== ループ =====================
@@ -1775,10 +2101,16 @@ function loop(now) {
 }
 requestAnimationFrame(loop);
 
+// 別のアプリに切り替えたら一時停止して音を止める（広告の表示中は広告側が音を止めている）
 document.addEventListener('visibilitychange', () => {
-  if (!Sound.ctx) return;
-  if (document.hidden) Sound.ctx.suspend(); else Sound.ctx.resume();
+  if (document.hidden) {
+    pauseGame();
+    Sound.suspend();
+  } else if (!Ads.showing) {
+    Sound.resume();
+  }
 });
+applyLang();
 }
 </script>
 </body>

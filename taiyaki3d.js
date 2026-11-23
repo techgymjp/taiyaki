@@ -226,8 +226,8 @@ function applyCook(model, cook) {
 }
 
 // ---------- レンダラ ----------
-export function createTaiyakiSprites() {
-  const PX = 320, PY = 240; // スプライトの解像度
+export function createTaiyakiSprites(opts = {}) {
+  const PX = opts.px || 320, PY = Math.round(PX * 0.75); // スプライトの解像度
   const canvas = document.createElement('canvas');
   canvas.width = PX; canvas.height = PY;
   let renderer;

@@ -1,0 +1,8 @@
+{
+  "appId": "jp.techgym.taiyaki",
+  "appName": "とべ！たいやきちゃん",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#3b2414"
+  }
+}
