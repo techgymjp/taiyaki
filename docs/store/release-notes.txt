@@ -1,0 +1,16 @@
+<ja-JP>
+「とべ！たいやきちゃん」をリリースしました。
+焼きあがったたい焼きを、たい焼き屋のおじさんに取られる前にタップ！気球に吊るして昇天させてあげましょう。
+・タップだけで遊べるかんたん操作
+・3D で再現したたい焼き機とおじさん
+・取られても、広告を見ればそのたい焼きを取り返せます（1 ゲーム 3 回まで）
+・日本語・英語対応
+</ja-JP>
+<en-US>
+Fly Away, Taiyaki-chan! is here.
+Tap the freshly baked taiyaki before the old man grabs them, and send them up to heaven on hot-air balloons!
+• Simple one-tap controls
+• A 3D taiyaki stand and a 3D old man
+• Got grabbed? Watch an ad to take that taiyaki back (up to 3 times per game)
+• English and Japanese
+</en-US>
