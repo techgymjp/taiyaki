@@ -133,7 +133,7 @@ function surface(x, y, d) {
 
 // ---------- 焼き色 ----------
 const RAMP = [
-  [0.0, [0.97, 0.92, 0.76]],
+  [0.0, [0.99, 0.91, 0.62]],
   [0.35, [0.95, 0.78, 0.45]],
   [0.65, [0.82, 0.52, 0.2]],
   [0.9, [0.6, 0.32, 0.1]],
@@ -217,7 +217,7 @@ function applyCook(model, cook) {
     let c = ramp(b);
     // 生っぽい部分はしっとり白っぽく
     const wet = Math.max(0, 1 - cook * 2.5);
-    c = [c[0] + (0.99 - c[0]) * wet * 0.3, c[1] + (0.95 - c[1]) * wet * 0.3, c[2] + (0.82 - c[2]) * wet * 0.3];
+    c = [c[0] + (1.0 - c[0]) * wet * 0.25, c[1] + (0.94 - c[1]) * wet * 0.25, c[2] + (0.66 - c[2]) * wet * 0.25];
     const r = toLinear(c[0]), g = toLinear(c[1]), bl = toLinear(c[2]);
     arr[k * 3] = r; arr[k * 3 + 1] = g; arr[k * 3 + 2] = bl;
     arr[(nv + k) * 3] = r; arr[(nv + k) * 3 + 1] = g; arr[(nv + k) * 3 + 2] = bl;
@@ -326,15 +326,12 @@ export function renderPlate(opts) {
   const sdf = makeSdf(buildOutline());
   const toU = (px, py) => ({ x: (px - cx) / ppu, y: -(py - cy) / ppu / cosT });
   const Wu = w / ppu, Du = h / ppu / cosT;
-  const holes = slots.map(s => toU(s.x, s.y));
+  const holes = slots.map(s => ({ ...toU(s.x, s.y), flip: !!s.flip }));
   const plates = rects.map(r => {
     const a = toU(r.x, r.y), b = toU(r.x + r.w, r.y + r.h);
     return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, hw: Math.abs(b.x - a.x) / 2, hh: Math.abs(b.y - a.y) / 2 };
   });
-  const bolts = [];
-  for (const p of plates) {
-    for (const sx of [-1, 1]) for (const sy of [-1, 1]) bolts.push({ x: p.cx + sx * (p.hw - 0.16), y: p.cy + sy * (p.hh - 0.16) });
-  }
+  const bolts = (opts.bolts || []).map(b => toU(b.x, b.y));
   const CAV = 1.06; // 型はたい焼きより少し大きい
   const R = 0.22;   // 角の丸み
 
@@ -373,12 +370,12 @@ export function renderPlate(opts) {
         const dd = Math.abs(X - hh.x) + Math.abs(Y - hh.y) * 1.5;
         if (dd < nd) { nd = dd; near = hh; }
       }
-      const lx = (X - near.x) / CAV, ly = (Y - near.y) / CAV;
+      const lx = (near.flip ? -1 : 1) * (X - near.x) / CAV, ly = (Y - near.y) / CAV;
       let d = -1, depth = 0;
       if (Math.abs(lx) < 1.35 && Math.abs(ly) < 0.95) d = sdf(lx, ly);
       if (d > 0) {
         const sf = surface(lx, ly, d);
-        depth = sf.dome * 0.9 + sf.relief * 1.7 + 0.012;
+        depth = sf.dome * 0.95 + sf.relief * 2.3 + 0.015;
         z -= depth * smooth(0.0, 0.035, d);
       } else if (d > -0.07) {
         z += 0.014 * smooth(-0.07, -0.02, d) * smooth(0.0, -0.012, d); // 型のふちの土手
@@ -386,14 +383,14 @@ export function renderPlate(opts) {
 
       // 色：使い込まれた鋳鉄（茶色がかったグレー）
       const n1 = fbm(X * 1.5 + 5, Y * 1.5), n2 = fbm(X * 10, Y * 10), n3 = fbm(X * 4 + 20, Y * 4 - 3);
-      let c = [0.215 + 0.05 * n1 + 0.04 * n2, 0.205 + 0.045 * n1 + 0.038 * n2, 0.2 + 0.04 * n1 + 0.036 * n2];
+      let c = [0.125 + 0.035 * n1 + 0.03 * n2, 0.122 + 0.033 * n1 + 0.03 * n2, 0.12 + 0.03 * n1 + 0.03 * n2];
       // 油なじみ：型の中と周りは茶色く、しっとり
       const oil = smooth(-0.3, 0.02, d) * (0.55 + 0.45 * n3);
-      c = [c[0] * (1 - 0.4 * oil) + 0.24 * oil * 0.4, c[1] * (1 - 0.4 * oil) + 0.16 * oil * 0.4, c[2] * (1 - 0.4 * oil) + 0.1 * oil * 0.4];
+      c = [c[0] * (1 - 0.15 * oil) + 0.15 * oil * 0.15, c[1] * (1 - 0.15 * oil) + 0.12 * oil * 0.15, c[2] * (1 - 0.15 * oil) + 0.1 * oil * 0.15];
       // 彫りの奥は暗く
       if (d > 0) {
         const deep = Math.min(1, depth * 3.2);
-        c = c.map(v => v * (1 - 0.35 * deep));
+        c = c.map(v => v * (1 - 0.3 * deep));
       }
       // こびりついた生地の焦げ（ふちの周り）
       if (d > -0.15 && d < 0.03) {
@@ -404,9 +401,9 @@ export function renderPlate(opts) {
       const mott = smooth(0.5, 0.75, fbm(X * 2.6 - 9, Y * 2.6 + 4));
       c = c.map((v, ci) => v * (1 - 0.12 * mott) + [0.15, 0.12, 0.1][ci] * 0.12 * mott);
       // ふちの角は擦れて明るい
-      const wear = smooth(0.06, 0.02, Math.abs(er - 0.1)) * 0.08;
+      const wear = smooth(0.06, 0.02, Math.abs(er - 0.1)) * 0.06;
       c = c.map(v => v + wear);
-      if (boltD < 0.075) c = [0.5, 0.49, 0.47];
+      if (boltD < 0.075) c = [0.62, 0.5, 0.3]; // 真鍮のボルト
 
       positions[k * 3] = X; positions[k * 3 + 1] = Y; positions[k * 3 + 2] = z;
       colors[k * 3] = toLinear(c[0]); colors[k * 3 + 1] = toLinear(c[1]); colors[k * 3 + 2] = toLinear(c[2]);
@@ -429,21 +426,21 @@ export function renderPlate(opts) {
   const hw = Wu / 2, hh2 = (h / ppu) / 2;
   const cam = new THREE.OrthographicCamera(-hw, hw, hh2, -hh2, 0.1, 20);
   cam.position.set(0, 0, 8);
-  scene.add(new THREE.HemisphereLight(0xfff2e4, 0x3a2a1c, 0.8));
-  const key = new THREE.DirectionalLight(0xfff0dd, 2.4);
-  key.position.set(-2, 3, 2.2);
+  scene.add(new THREE.HemisphereLight(0xf4f4f6, 0x222222, 0.7));
+  const key = new THREE.DirectionalLight(0xfff6ea, 3.0);
+  key.position.set(-2.5, 2.2, 1.0);
   scene.add(key);
   const fill = new THREE.DirectionalLight(0xffd2a0, 0.6);
   fill.position.set(3, -2, 1.5);
   scene.add(fill);
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.35 });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.25 });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.rotation.x = -TILT;
   scene.add(mesh);
   // ぼんやりした映り込み
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envScene = new THREE.Scene();
-  envScene.background = new THREE.Color(0x4a3a2c);
+  envScene.background = new THREE.Color(0x3a3a3c);
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 8), new THREE.MeshBasicMaterial({ color: 0xfff2d8 }));
   lamp.position.set(-3, 5, 4); lamp.scale.setScalar(2.5);
   envScene.add(lamp);
